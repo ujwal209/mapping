@@ -12,8 +12,6 @@ import {
   Folder,
   Server,
   BookOpen,
-  FileCode2,
-  Code2,
   Table2,
   Compass,
   ListChecks,
@@ -78,22 +76,20 @@ const NAV_GROUPS: NavGroup[] = [
     heading: 'MODELING',
     items: [
       { label: 'Ontology Studio', to: '/ontology', icon: BookOpen },
-      { label: 'Knowledge Base', to: '/knowledge-base', icon: FileCode2 },
-      { label: 'Transformations', to: '/transformations', icon: Code2 },
     ],
   },
   {
     heading: 'SCHEMA MAPPING',
     items: [
-      { label: 'Table Matching', to: '/table-matching', icon: Table2 },
       { label: 'Discover Pairs', to: '/table-matching/discover', icon: Compass },
+      { label: 'Table Matching', to: '/table-matching', icon: Table2 },
     ],
   },
   {
     heading: 'MIGRATIONS',
     items: [
-      { label: 'Migration Runs', to: '/migrations', icon: ListChecks, exact: true },
       { label: 'Start Migration', to: '/migrations/new', icon: Rocket },
+      { label: 'Migration Runs', to: '/migrations', icon: ListChecks, exact: true },
     ],
   },
 ]

@@ -1,7 +1,8 @@
 import { ApiError, tokenStorage } from '../authApi'
 
 const RAW_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, '') || 'http://127.0.0.1:8000'
+  (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '') ||
+  'http://127.0.0.1:8000'
 
 export const API_BASE_URL = RAW_BASE.endsWith('/api/v1')
   ? RAW_BASE

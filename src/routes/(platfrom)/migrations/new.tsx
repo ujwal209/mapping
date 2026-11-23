@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
@@ -13,6 +13,8 @@ import {
   HelpCircle,
   Check,
   ShieldAlert,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveProjectId, API_V1, authHeaders } from '../../../lib/api-config';
@@ -44,6 +46,9 @@ function NewMigrationPage() {
   const [mappingSets, setMappingSets] = useState<PairMappingSet[]>([]);
   const [selectedSetId, setSelectedSetId] = useState<string>('');
   const [systemsMap, setSystemsMap] = useState<Record<string, SystemInfo>>({});
+  const [schemaDropdownOpen, setSchemaDropdownOpen] = useState(false);
+  const [approvingSchema, setApprovingSchema] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Form State
   const [name, setName] = useState('');
@@ -60,6 +65,18 @@ function NewMigrationPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!schemaDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setSchemaDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [schemaDropdownOpen]);
 
   // Load Mapping Sets & Systems
   useEffect(() => {
@@ -87,7 +104,8 @@ function NewMigrationPage() {
         setMappingSets(sets || []);
 
         if (sets && sets.length > 0) {
-          const first = sets[0];
+          // Prioritize already APPROVED schema sets
+          const first = sets.find((s) => s.status === 'APPROVED') || sets[0];
           setSelectedSetId(first.set_id);
           setName(first.name ? `${first.name} Migration` : 'Data Pipeline Migration');
           setVersionTag(first.version_tag || '1.0.0');
@@ -111,10 +129,38 @@ function NewMigrationPage() {
     void loadData();
   }, [projectId]);
 
+  const approvedSets = useMemo(
+    () => mappingSets.filter((s) => s.status === 'APPROVED'),
+    [mappingSets]
+  );
+  const draftSets = useMemo(
+    () => mappingSets.filter((s) => s.status !== 'APPROVED'),
+    [mappingSets]
+  );
+
   const selectedSet = useMemo(
     () => mappingSets.find((s) => s.set_id === selectedSetId) || null,
     [mappingSets, selectedSetId]
   );
+
+  const handleApproveSchema = async () => {
+    if (!selectedSet) return;
+    setApprovingSchema(true);
+    try {
+      const updated = await pairMappingApi.finalize(selectedSet.set_id, {
+        actor: 'user',
+        comments: 'Approved prior to migration launch',
+      });
+      toast.success('Schema approved successfully');
+      setMappingSets((prev) =>
+        prev.map((s) => (s.set_id === updated.set_id ? updated : s))
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to approve schema');
+    } finally {
+      setApprovingSchema(false);
+    }
+  };
 
   const handleSelectSet = (setId: string) => {
     setSelectedSetId(setId);
@@ -154,6 +200,12 @@ function NewMigrationPage() {
   const handleSubmit = async (asDraft: boolean) => {
     if (!selectedSet) {
       toast.error('Select an approved Schema Mapping Set.');
+      return;
+    }
+    if (!asDraft && selectedSet.status !== 'APPROVED') {
+      toast.error(
+        'The selected schema is in DRAFT status. Please click "Approve Schema Now" above, or save as Draft Migration.'
+      );
       return;
     }
     if (!name.trim()) {
@@ -275,86 +327,206 @@ function NewMigrationPage() {
         ) : (
           <div className="space-y-5">
             {/* Step 1: Mapping Set Selection */}
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3.5 shadow-xs">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
-                <span className="flex h-5 w-5 rounded bg-slate-100 text-slate-800 items-center justify-center text-[11px] font-bold font-mono">
-                  1
-                </span>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Select Approved Mapping Schema
-                </h2>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 rounded bg-slate-100 text-slate-800 items-center justify-center text-[11px] font-bold font-mono">
+                    1
+                  </span>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    Select Approved Mapping Schema
+                  </h2>
+                </div>
+                <div className="text-[11px] font-medium text-slate-500">
+                  {approvedSets.length} approved · {draftSets.length} draft
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-2.5">
-                {mappingSets.map((s) => {
-                  const selected = s.set_id === selectedSetId;
-                  const sSys = s.source_system_id ? systemsMap[s.source_system_id] : null;
-                  const tSys = s.target_system_id ? systemsMap[s.target_system_id] : null;
-
-                  return (
-                    <button
-                      key={s.set_id}
-                      type="button"
-                      onClick={() => handleSelectSet(s.set_id)}
-                      className={`w-full text-left p-3.5 rounded-xl border transition flex items-start justify-between gap-3 ${
-                        selected
-                          ? 'border-slate-900 bg-slate-50/70'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div className="space-y-1 min-w-0">
+              {/* Dropdown Container */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setSchemaDropdownOpen((prev) => !prev)}
+                  className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-300 bg-white hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-[#39359D]/20 transition shadow-2xs text-left"
+                >
+                  {selectedSet ? (
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                        <Layers className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-slate-900 break-words">
-                            {s.name || 'Column Mapping Set'}
+                          <span className="font-semibold text-xs text-slate-900 truncate">
+                            {selectedSet.name || 'Column Mapping Set'}
                           </span>
-                          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                            v{s.version_tag || '1.0.0'}
+                          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                            v{selectedSet.version_tag || '1.0.0'}
                           </span>
-                          {s.status === 'APPROVED' ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          {selectedSet.status === 'APPROVED' ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
                               <Check className="w-3 h-3 text-emerald-600" />
                               Approved
                             </span>
                           ) : (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
-                              {s.status}
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
+                              Draft
                             </span>
                           )}
                         </div>
-
-                        {/* Systems representation */}
-                        <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
-                          <span className="font-medium text-slate-900">
-                            {sSys?.name || s.source_system_id || 'Source'}
-                          </span>
-                          {sSys?.connector_type && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 font-mono uppercase text-slate-500">
-                              {sSys.connector_type}
-                            </span>
-                          )}
-                          <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span className="font-medium text-slate-900">
-                            {tSys?.name || s.target_system_id || 'Target'}
-                          </span>
-                          {tSys?.connector_type && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 font-mono uppercase text-slate-500">
-                              {tSys.connector_type}
-                            </span>
-                          )}
-                          <span className="text-slate-400">·</span>
-                          <span className="text-slate-500 font-mono">
-                            {s.pairs?.length || 0} tables
-                          </span>
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                          {selectedSet.source_system_id ? systemsMap[selectedSet.source_system_id]?.name || selectedSet.source_system_id : 'Source'} → {selectedSet.target_system_id ? systemsMap[selectedSet.target_system_id]?.name || selectedSet.target_system_id : 'Target'} · {selectedSet.pairs?.length || 0} tables
                         </div>
                       </div>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-500">Choose a mapping schema...</span>
+                  )}
+                  {schemaDropdownOpen ? (
+                    <ChevronUp className="w-4 h-4 text-slate-500 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
+                  )}
+                </button>
 
-                      {selected && (
-                        <Check className="w-4 h-4 text-slate-900 shrink-0 mt-0.5" />
+                {/* Dropdown Menu */}
+                {schemaDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl space-y-2">
+                    {/* Approved Schemas Section */}
+                    {approvedSets.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50/50 rounded flex items-center gap-1.5">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>Approved Mapping Schemas (Ready)</span>
+                        </div>
+                        {approvedSets.map((s) => {
+                          const isSel = s.set_id === selectedSetId;
+                          const sSys = s.source_system_id ? systemsMap[s.source_system_id] : null;
+                          const tSys = s.target_system_id ? systemsMap[s.target_system_id] : null;
+                          return (
+                            <button
+                              key={s.set_id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectSet(s.set_id);
+                                setSchemaDropdownOpen(false);
+                              }}
+                              className={`w-full text-left p-2.5 rounded-lg border transition flex items-center justify-between gap-2 ${
+                                isSel
+                                  ? 'border-emerald-300 bg-emerald-50/40 text-emerald-950'
+                                  : 'border-transparent hover:bg-slate-50 text-slate-800'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold truncate">{s.name || 'Schema Set'}</span>
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                    v{s.version_tag || '1.0.0'}
+                                  </span>
+                                  <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-emerald-100/70 text-emerald-800 font-medium">
+                                    Approved
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                                  {sSys?.name || s.source_system_id || 'Source'} → {tSys?.name || s.target_system_id || 'Target'} · {s.pairs?.length || 0} tables
+                                </div>
+                              </div>
+                              {isSel && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Draft Schemas Section */}
+                    {draftSets.length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-slate-100">
+                        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                          <span>Draft Mapping Schemas (Requires Approval)</span>
+                        </div>
+                        {draftSets.map((s) => {
+                          const isSel = s.set_id === selectedSetId;
+                          const sSys = s.source_system_id ? systemsMap[s.source_system_id] : null;
+                          const tSys = s.target_system_id ? systemsMap[s.target_system_id] : null;
+                          return (
+                            <button
+                              key={s.set_id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectSet(s.set_id);
+                                setSchemaDropdownOpen(false);
+                              }}
+                              className={`w-full text-left p-2.5 rounded-lg border transition flex items-center justify-between gap-2 ${
+                                isSel
+                                  ? 'border-amber-300 bg-amber-50/40 text-amber-950'
+                                  : 'border-transparent hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold truncate">{s.name || 'Schema Set'}</span>
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                    v{s.version_tag || '1.0.0'}
+                                  </span>
+                                  <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-amber-100/70 text-amber-800 font-medium">
+                                    Draft
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                                  {sSys?.name || s.source_system_id || 'Source'} → {tSys?.name || s.target_system_id || 'Target'} · {s.pairs?.length || 0} tables
+                                </div>
+                              </div>
+                              {isSel && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Status & Details Banner for Selected Schema */}
+              {selectedSet && (
+                selectedSet.status === 'APPROVED' ? (
+                  <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 text-emerald-900 font-medium">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Schema is <strong>APPROVED</strong> and fully validated for migration execution.</span>
+                    </div>
+                    <span className="font-mono text-[11px] text-emerald-700 font-semibold bg-emerald-100/60 px-2 py-0.5 rounded">
+                      {selectedSet.pairs?.length || 0} Tables Ready
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-start sm:items-center gap-2 text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+                      <span>
+                        This schema is currently in <strong>DRAFT</strong> status. Migration runs require an approved schema.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={approvingSchema}
+                      onClick={handleApproveSchema}
+                      className="inline-flex items-center justify-center gap-1.5 h-7 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs shadow-2xs transition shrink-0 disabled:opacity-50"
+                    >
+                      {approvingSchema ? (
+                        <>
+                          <LoaderCircle className="w-3 h-3 animate-spin" />
+                          <span>Approving…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Approve Schema Now</span>
+                        </>
                       )}
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                )
+              )}
             </div>
 
             {/* Step 2: Migration Identity */}

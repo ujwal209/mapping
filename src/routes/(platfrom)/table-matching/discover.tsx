@@ -124,18 +124,23 @@ function DiscoverSchemaMappingPage() {
     }
 
     try {
-      const res = await fetch(
-        `${API_BASE}/mapping-sets/${encodeURIComponent(
-          projectId
-        )}/table-pairs/propose/stream`,
-        {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify(payload),
-        }
-      )
+      let res: Response | null = null
+      try {
+        res = await fetch(
+          `${API_BASE}/mapping-sets/${encodeURIComponent(
+            projectId
+          )}/table-pairs/propose/stream`,
+          {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload),
+          }
+        )
+      } catch (streamErr) {
+        console.warn('Stream fetch failed, falling back to direct endpoint:', streamErr)
+      }
 
-      if (!res.ok) {
+      if (!res || !res.ok) {
         const fallbackRes = await fetch(
           `${API_BASE}/mapping-sets/${encodeURIComponent(
             projectId

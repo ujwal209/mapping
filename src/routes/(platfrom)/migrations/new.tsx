@@ -1,18 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
   ArrowRight,
   Rocket,
   FileEdit,
-  Database,
   Layers,
   CheckCircle2,
   AlertTriangle,
   LoaderCircle,
-  HelpCircle,
   Check,
-  ShieldAlert,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -35,6 +32,7 @@ interface SystemInfo {
   system_id: string;
   name: string;
   connector_type: string;
+  project_id?: string;
 }
 
 function NewMigrationPage() {
@@ -78,39 +76,54 @@ function NewMigrationPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [schemaDropdownOpen]);
 
-  // Load Mapping Sets & Systems
+  // Load Mapping Sets & Systems strictly scoped to current user & project
   useEffect(() => {
     async function loadData() {
       setLoadingSets(true);
       setError(null);
       try {
-        // Fetch systems to get human readable names
-        const sysRes = await fetch(`${API_V1}/systems`, {
+        const sysQuery = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+        const sysRes = await fetch(`${API_V1}/systems${sysQuery}`, {
           headers: authHeaders(),
         });
         const sysData = sysRes.ok ? await sysRes.json() : [];
         const sMap: Record<string, SystemInfo> = {};
-        for (const s of sysData) {
+        for (const s of Array.isArray(sysData) ? sysData : []) {
+          if (s.is_deleted || s.deleted_at || s.status === 'DELETED') continue;
+          if (projectId && s.project_id && s.project_id !== projectId) continue;
           sMap[s.system_id] = {
             system_id: s.system_id,
             name: s.name,
             connector_type: s.connector_type,
+            project_id: s.project_id,
           };
         }
         setSystemsMap(sMap);
 
-        // Fetch approved pair mapping sets
-        const sets = await pairMappingApi.list(projectId);
-        setMappingSets(sets || []);
+        // Fetch pair mapping sets and strictly exclude deleted or cross-project/cross-user sets
+        const rawSets = await pairMappingApi.list(projectId);
+        const validSets = (rawSets || []).filter((s: any) => {
+          const status = String(s.status || '').toUpperCase();
+          if (status === 'DELETED' || status === 'ARCHIVED') return false;
+          if (s.is_deleted === true || Boolean(s.deleted_at)) return false;
+          // Enforce strict project scoping when project_id is present
+          if (projectId && s.project_id && s.project_id !== projectId) return false;
+          // Exclude sets referencing systems that no longer exist for this user/project
+          if (Object.keys(sMap).length > 0) {
+            if (s.source_system_id && !sMap[s.source_system_id]) return false;
+            if (s.target_system_id && !sMap[s.target_system_id]) return false;
+          }
+          return true;
+        });
 
-        if (sets && sets.length > 0) {
-          // Prioritize already APPROVED schema sets
-          const first = sets.find((s) => s.status === 'APPROVED') || sets[0];
+        setMappingSets(validSets);
+
+        if (validSets.length > 0) {
+          const first = validSets.find((s) => s.status === 'APPROVED') || validSets[0];
           setSelectedSetId(first.set_id);
           setName(first.name ? `${first.name} Migration` : 'Data Pipeline Migration');
           setVersionTag(first.version_tag || '1.0.0');
 
-          // Initialize tables
           const initialSel: Record<string, boolean> = {};
           const initialModes: Record<string, 'UPSERT' | 'APPEND' | 'REPLACE'> = {};
           for (const p of first.pairs || []) {
@@ -119,6 +132,8 @@ function NewMigrationPage() {
           }
           setSelectedTables(initialSel);
           setTableLoadModes(initialModes);
+        } else {
+          setSelectedSetId('');
         }
       } catch (e: any) {
         setError(e?.message || 'Failed to load mapping sets');
@@ -269,7 +284,7 @@ function NewMigrationPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-50/50 text-slate-900 pb-20">
+    <div className="min-h-[calc(100vh-4rem)] bg-[#F8FAFC] text-slate-900 pb-20">
       <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-slate-200 pb-5">
@@ -307,7 +322,7 @@ function NewMigrationPage() {
               No Approved Mapping Sets Available
             </h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Before creating a migration, you must generate and approve table-pair mappings in Table Matching Studio.
+              Before creating a migration, you must generate and approve table-pair mappings for this project.
             </p>
             <div className="pt-2">
               <button
@@ -347,11 +362,11 @@ function NewMigrationPage() {
                 <button
                   type="button"
                   onClick={() => setSchemaDropdownOpen((prev) => !prev)}
-                  className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-300 bg-white hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-[#39359D]/20 transition shadow-2xs text-left"
+                  className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-300 bg-white hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 transition shadow-2xs text-left"
                 >
                   {selectedSet ? (
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F8FAFC] border border-slate-200 text-slate-700">
                         <Layers className="w-4 h-4" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -375,7 +390,16 @@ function NewMigrationPage() {
                           )}
                         </div>
                         <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                          {selectedSet.source_system_id ? systemsMap[selectedSet.source_system_id]?.name || selectedSet.source_system_id : 'Source'} → {selectedSet.target_system_id ? systemsMap[selectedSet.target_system_id]?.name || selectedSet.target_system_id : 'Target'} · {selectedSet.pairs?.length || 0} tables
+                          {selectedSet.source_system_id
+                            ? systemsMap[selectedSet.source_system_id]?.name ||
+                              selectedSet.source_system_id
+                            : 'Source'}{' '}
+                          →{' '}
+                          {selectedSet.target_system_id
+                            ? systemsMap[selectedSet.target_system_id]?.name ||
+                              selectedSet.target_system_id
+                            : 'Target'}{' '}
+                          · {selectedSet.pairs?.length || 0} tables
                         </div>
                       </div>
                     </div>
@@ -392,7 +416,6 @@ function NewMigrationPage() {
                 {/* Dropdown Menu */}
                 {schemaDropdownOpen && (
                   <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl space-y-2">
-                    {/* Approved Schemas Section */}
                     {approvedSets.length > 0 && (
                       <div className="space-y-1">
                         <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50/50 rounded flex items-center gap-1.5">
@@ -414,12 +437,14 @@ function NewMigrationPage() {
                               className={`w-full text-left p-2.5 rounded-lg border transition flex items-center justify-between gap-2 ${
                                 isSel
                                   ? 'border-emerald-300 bg-emerald-50/40 text-emerald-950'
-                                  : 'border-transparent hover:bg-slate-50 text-slate-800'
+                                  : 'border-transparent hover:bg-[#F8FAFC] text-slate-800'
                               }`}
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold truncate">{s.name || 'Schema Set'}</span>
+                                  <span className="text-xs font-semibold truncate">
+                                    {s.name || 'Schema Set'}
+                                  </span>
                                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
                                     v{s.version_tag || '1.0.0'}
                                   </span>
@@ -428,7 +453,9 @@ function NewMigrationPage() {
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {sSys?.name || s.source_system_id || 'Source'} → {tSys?.name || s.target_system_id || 'Target'} · {s.pairs?.length || 0} tables
+                                  {sSys?.name || s.source_system_id || 'Source'} →{' '}
+                                  {tSys?.name || s.target_system_id || 'Target'} ·{' '}
+                                  {s.pairs?.length || 0} tables
                                 </div>
                               </div>
                               {isSel && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
@@ -438,7 +465,6 @@ function NewMigrationPage() {
                       </div>
                     )}
 
-                    {/* Draft Schemas Section */}
                     {draftSets.length > 0 && (
                       <div className="space-y-1 pt-1 border-t border-slate-100">
                         <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
@@ -459,12 +485,14 @@ function NewMigrationPage() {
                               className={`w-full text-left p-2.5 rounded-lg border transition flex items-center justify-between gap-2 ${
                                 isSel
                                   ? 'border-amber-300 bg-amber-50/40 text-amber-950'
-                                  : 'border-transparent hover:bg-slate-50 text-slate-700'
+                                  : 'border-transparent hover:bg-[#F8FAFC] text-slate-700'
                               }`}
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold truncate">{s.name || 'Schema Set'}</span>
+                                  <span className="text-xs font-semibold truncate">
+                                    {s.name || 'Schema Set'}
+                                  </span>
                                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
                                     v{s.version_tag || '1.0.0'}
                                   </span>
@@ -473,7 +501,9 @@ function NewMigrationPage() {
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {sSys?.name || s.source_system_id || 'Source'} → {tSys?.name || s.target_system_id || 'Target'} · {s.pairs?.length || 0} tables
+                                  {sSys?.name || s.source_system_id || 'Source'} →{' '}
+                                  {tSys?.name || s.target_system_id || 'Target'} ·{' '}
+                                  {s.pairs?.length || 0} tables
                                 </div>
                               </div>
                               {isSel && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
@@ -486,13 +516,14 @@ function NewMigrationPage() {
                 )}
               </div>
 
-              {/* Status & Details Banner for Selected Schema */}
-              {selectedSet && (
-                selectedSet.status === 'APPROVED' ? (
+              {selectedSet &&
+                (selectedSet.status === 'APPROVED' ? (
                   <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2 text-emerald-900 font-medium">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Schema is <strong>APPROVED</strong> and fully validated for migration execution.</span>
+                      <span>
+                        Schema is <strong>APPROVED</strong> and fully validated for migration execution.
+                      </span>
                     </div>
                     <span className="font-mono text-[11px] text-emerald-700 font-semibold bg-emerald-100/60 px-2 py-0.5 rounded">
                       {selectedSet.pairs?.length || 0} Tables Ready
@@ -525,8 +556,7 @@ function NewMigrationPage() {
                       )}
                     </button>
                   </div>
-                )
-              )}
+                ))}
             </div>
 
             {/* Step 2: Migration Identity */}
@@ -609,7 +639,7 @@ function NewMigrationPage() {
                       <div
                         key={`${p.source_table}-${p.target_table}`}
                         className={`p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
-                          included ? 'bg-white' : 'bg-slate-50/70 opacity-60'
+                          included ? 'bg-white' : 'bg-[#F8FAFC] opacity-60'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -635,7 +665,6 @@ function NewMigrationPage() {
                           </div>
                         </div>
 
-                        {/* Load Mode Selector */}
                         {included && (
                           <div className="flex items-center gap-1 self-end sm:self-center">
                             {(['UPSERT', 'APPEND', 'REPLACE'] as const).map(
@@ -719,8 +748,8 @@ function NewMigrationPage() {
 
             {/* Error banner */}
             {error && (
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-xs flex items-center gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
                 <span>{error}</span>
               </div>
             )}

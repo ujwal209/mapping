@@ -67,7 +67,14 @@ export interface MigrationErrorRecord {
   target_table: string;
   row_index?: number;
   record_id?: string;
-  error_category: 'VALIDATION' | 'FOREIGN_KEY' | 'UNIQUE_CONSTRAINT' | 'NOT_NULL' | 'TYPE_MISMATCH' | 'PERMISSION_DENIED' | 'DATABASE_ERROR';
+  error_category:
+    | 'VALIDATION'
+    | 'FOREIGN_KEY'
+    | 'UNIQUE_CONSTRAINT'
+    | 'NOT_NULL'
+    | 'TYPE_MISMATCH'
+    | 'PERMISSION_DENIED'
+    | 'DATABASE_ERROR';
   error_message: string;
   column_name?: string;
   raw_payload?: Record<string, any>;
@@ -88,8 +95,26 @@ export interface MigrationRun {
   target_system_name: string;
   source_connector_type: string;
   target_connector_type: string;
-  state: 'DRAFT' | 'QUEUED' | 'RUNNING' | 'AWAITING_LOAD_REVIEW' | 'LOADING' | 'COMPLETED' | 'PAUSED' | 'FAILED' | 'ABORTED' | 'SIGNED_OFF';
-  phase: 'PREFLIGHT' | 'EXTRACT' | 'TRANSFORM' | 'VALIDATE' | 'AWAITING_LOAD_REVIEW' | 'LOAD' | 'RECONCILE' | 'DONE';
+  state:
+    | 'DRAFT'
+    | 'QUEUED'
+    | 'RUNNING'
+    | 'AWAITING_LOAD_REVIEW'
+    | 'LOADING'
+    | 'COMPLETED'
+    | 'PAUSED'
+    | 'FAILED'
+    | 'ABORTED'
+    | 'SIGNED_OFF';
+  phase:
+    | 'PREFLIGHT'
+    | 'EXTRACT'
+    | 'TRANSFORM'
+    | 'VALIDATE'
+    | 'AWAITING_LOAD_REVIEW'
+    | 'LOAD'
+    | 'RECONCILE'
+    | 'DONE';
   is_paused: boolean;
   can_resume: boolean;
   tables_total: number;
@@ -132,17 +157,33 @@ export interface CreateRunPayload {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_V1}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      ...authHeaders(),
-      ...(options.headers || {}),
-    },
-  });
+  const hasBody = options.body !== undefined && options.body !== null;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      cache: 'no-store',
+      headers: {
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        ...authHeaders(),
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err: any) {
+    throw new Error(
+      `Network error reaching migration service (${url}). Ensure the backend server is running and CORS is allowed.`
+    );
+  }
+
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(
-      errorBody?.detail || `Migration API Error: ${res.status} ${res.statusText}`
+      errorBody?.detail ||
+        errorBody?.message ||
+        `Migration API Error: ${res.status} ${res.statusText}`
     );
   }
   return res.json();

@@ -3,22 +3,23 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  AlertTriangle,
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Copy,
   Expand,
   GitBranch,
   Hand,
-  KeyRound,
   Layers,
   LayoutGrid,
   Link2,
   Loader2,
-  Map,
+  Map as MapIcon,
   Maximize2,
   MessageSquarePlus,
   Minus,
@@ -66,14 +67,17 @@ export const Route = createFileRoute('/(platfrom)/ontology/')({
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
    ──────────────────────────────────────────────────────────── */
-const CARD_W = 268
-const CARD_H = 200
-const MINIMAP_W = 184
-const MINIMAP_H = 124
-const MIN_ZOOM = 0.35
-const MAX_ZOOM = 2
+const CARD_W = 264
+const CARD_COLLAPSED_H = 44
+const CARD_EXPANDED_H = 204
+const MINIMAP_W = 196
+const MINIMAP_H = 132
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 2.5
 const GRID_BASE = 24
 const SURFACE = '#F8FAFC'
+const FONT_STACK =
+  "'Google Sans', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
 
 /* ────────────────────────────────────────────────────────────
    MAIN PAGE
@@ -127,7 +131,10 @@ function OntologyStudioPage() {
   const [relCardinality, setRelCardinality] = useState('1:N')
   const [relLabel, setRelLabel] = useState('')
 
-  /* Collapsible groups in tables */
+  /* Collapsible groups in tables & canvas (empty Set = minimized by default) */
+  const [expandedCanvasCardIds, setExpandedCanvasCardIds] = useState<
+    Set<string>
+  >(new Set())
   const [expandedEntityIds, setExpandedEntityIds] = useState<Set<string>>(
     new Set()
   )
@@ -137,7 +144,7 @@ function OntologyStudioPage() {
 
   /* Canvas */
   const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 40, y: 40 })
+  const [pan, setPan] = useState({ x: 48, y: 48 })
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0 })
 
@@ -161,6 +168,19 @@ function OntologyStudioPage() {
   )
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const canvasRef = useRef<HTMLDivElement>(null)
+
+  /* Ensure Google Sans font is loaded */
+  useEffect(() => {
+    const id = 'google-sans-font-link'
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link')
+      link.id = id
+      link.rel = 'stylesheet'
+      link.href =
+        'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&display=swap'
+      document.head.appendChild(link)
+    }
+  }, [])
 
   const notify = (msg: string) => {
     setToast(msg)
@@ -193,11 +213,19 @@ function OntologyStudioPage() {
         return ent.position
       }
       return {
-        x: (fallbackIdx % 3) * 320 + 40,
-        y: Math.floor(fallbackIdx / 3) * 270 + 40,
+        x: (fallbackIdx % 4) * 300 + 48,
+        y: Math.floor(fallbackIdx / 4) * 116 + 48,
       }
     },
     []
+  )
+
+  const getCardHeight = useCallback(
+    (ent: OntologyEntity, idx: number) => {
+      const id = ent.entity_id || String(idx)
+      return expandedCanvasCardIds.has(id) ? CARD_EXPANDED_H : CARD_COLLAPSED_H
+    },
+    [expandedCanvasCardIds]
   )
 
   const normalizeEntityPositions = useCallback(
@@ -213,8 +241,8 @@ function OntologyStudioPage() {
         return {
           ...ent,
           position: {
-            x: (idx % 3) * 320 + 40,
-            y: Math.floor(idx / 3) * 270 + 40,
+            x: (idx % 4) * 300 + 48,
+            y: Math.floor(idx / 4) * 116 + 48,
           },
         }
       })
@@ -275,8 +303,9 @@ function OntologyStudioPage() {
       setViewMode('builder')
       setActiveTab('graph')
       setDirty(false)
-      setPan({ x: 40, y: 40 })
+      setPan({ x: 48, y: 48 })
       setZoom(1)
+      setExpandedCanvasCardIds(new Set())
       setExpandedEntityIds(new Set())
       setExpandedRelationshipIds(new Set())
     }
@@ -405,52 +434,7 @@ function OntologyStudioPage() {
     }
   }
 
-  /* ── Viewport helpers ─────────────────────────────────────── */
-  const getMinimapBounds = useCallback(() => {
-    if (!selectedOntology || selectedOntology.entities.length === 0) {
-      return { minX: 0, minY: 0, w: 1000, h: 700 }
-    }
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity
-    selectedOntology.entities.forEach((ent, i) => {
-      const pos = getEntityPos(ent, i)
-      if (pos.x < minX) minX = pos.x
-      if (pos.y < minY) minY = pos.y
-      if (pos.x + CARD_W > maxX) maxX = pos.x + CARD_W
-      if (pos.y + CARD_H > maxY) maxY = pos.y + CARD_H
-    })
-    const pad = 80
-    minX -= pad
-    minY -= pad
-    maxX += pad
-    maxY += pad
-    return {
-      minX,
-      minY,
-      w: Math.max(600, maxX - minX),
-      h: Math.max(400, maxY - minY),
-    }
-  }, [selectedOntology, getEntityPos])
-
-  const handleMinimapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation()
-    const rect = e.currentTarget.getBoundingClientRect()
-    const clickX = e.clientX - rect.left
-    const clickY = e.clientY - rect.top
-    const bounds = getMinimapBounds()
-    const scale = Math.min(MINIMAP_W / bounds.w, MINIMAP_H / bounds.h)
-    const targetWorldX = bounds.minX + clickX / scale
-    const targetWorldY = bounds.minY + clickY / scale
-    const clientW = canvasRef.current?.clientWidth || 1000
-    const clientH = canvasRef.current?.clientHeight || 700
-    setPan({
-      x: Math.round(clientW / 2 - targetWorldX * zoom),
-      y: Math.round(clientH / 2 - targetWorldY * zoom),
-    })
-  }
-
+  /* ── Viewport & Zoom helpers ──────────────────────────────── */
   const handleFitView = useCallback(() => {
     if (
       !selectedOntology ||
@@ -464,60 +448,109 @@ function OntologyStudioPage() {
       maxY = -Infinity
     selectedOntology.entities.forEach((ent, i) => {
       const pos = getEntityPos(ent, i)
+      const h = getCardHeight(ent, i)
       if (pos.x < minX) minX = pos.x
       if (pos.y < minY) minY = pos.y
       if (pos.x + CARD_W > maxX) maxX = pos.x + CARD_W
-      if (pos.y + CARD_H > maxY) maxY = pos.y + CARD_H
+      if (pos.y + h > maxY) maxY = pos.y + h
     })
     const rect = canvasRef.current.getBoundingClientRect()
-    const padding = 96
+    const padding = 88
     const contentW = maxX - minX + padding * 2
     const contentH = maxY - minY + padding * 2
     const scaleX = rect.width / contentW
     const scaleY = rect.height / contentH
     const nextZoom = Math.min(
       MAX_ZOOM,
-      Math.max(MIN_ZOOM, Math.min(scaleX, scaleY, 1.1))
+      Math.max(MIN_ZOOM, Math.min(scaleX, scaleY, 1.05))
     )
     const nextPanX =
       (rect.width - (maxX - minX) * nextZoom) / 2 - minX * nextZoom
     const nextPanY =
       (rect.height - (maxY - minY) * nextZoom) / 2 - minY * nextZoom
-    setZoom(+nextZoom.toFixed(2))
+    setZoom(+nextZoom.toFixed(3))
     setPan({ x: Math.round(nextPanX), y: Math.round(nextPanY) })
-  }, [selectedOntology, getEntityPos])
+  }, [selectedOntology, getEntityPos, getCardHeight])
 
-  /* ── Ctrl/Cmd + wheel zoom ────────────────────────────────── */
+  const zoomAtCenter = useCallback((factor: number) => {
+    const el = canvasRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const cx = rect.width / 2
+    const cy = rect.height / 2
+    setZoom((prev) => {
+      const next = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, +(prev * factor).toFixed(3))
+      )
+      setPan((p) => ({
+        x: cx - ((cx - p.x) * next) / prev,
+        y: cy - ((cy - p.y) * next) / prev,
+      }))
+      return next
+    })
+  }, [])
+
+  /* ── Smooth Ctrl/Cmd + wheel zoom & keyboard zoom ─────────── */
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
+
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
-      setZoom((prev) => {
-        const factor = e.deltaY < 0 ? 1.08 : 0.92
-        const next = Math.min(
-          MAX_ZOOM,
-          Math.max(MIN_ZOOM, +(prev * factor).toFixed(3))
-        )
-        setPan((p) => ({
-          x: mx - ((mx - p.x) * next) / prev,
-          y: my - ((my - p.y) * next) / prev,
-        }))
-        return next
-      })
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        const rect = el.getBoundingClientRect()
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
+        const clampedDelta = Math.max(-100, Math.min(100, e.deltaY))
+        const factor = Math.exp(-clampedDelta * 0.0025)
+
+        setZoom((prev) => {
+          const next = Math.min(
+            MAX_ZOOM,
+            Math.max(MIN_ZOOM, +(prev * factor).toFixed(4))
+          )
+          setPan((p) => ({
+            x: mx - ((mx - p.x) * next) / prev,
+            y: my - ((my - p.y) * next) / prev,
+          }))
+          return next
+        })
+      }
     }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        ['INPUT', 'TEXTAREA'].includes(
+          (e.target as HTMLElement)?.tagName || ''
+        )
+      ) {
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        zoomAtCenter(1.15)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault()
+        zoomAtCenter(0.87)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault()
+        setZoom(1)
+      }
+    }
+
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [viewMode, activeTab])
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [viewMode, activeTab, loadingOnt, selectedOntology, zoomAtCenter])
 
   /* ── Canvas pointer handlers ──────────────────────────────── */
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.button !== 1) return
-    // Only react when the pointer targets the background (not a card)
     if (e.target !== e.currentTarget) return
 
     if (canvasTool === 'hand') {
@@ -575,10 +608,10 @@ function OntologyStudioPage() {
           Math.max(selectionBox.startY, selectionBox.currentY) - rect.top
         if (boxX2 - boxX1 > 5 || boxY2 - boxY1 > 5) {
           const cardW = CARD_W * zoom
-          const cardH = CARD_H * zoom
           const newlySelected: string[] = []
           selectedOntology.entities.forEach((ent, i) => {
             const pos = getEntityPos(ent, i)
+            const cardH = getCardHeight(ent, i) * zoom
             const screenX = pan.x + pos.x * zoom
             const screenY = pan.y + pos.y * zoom
             const overlaps =
@@ -601,9 +634,8 @@ function OntologyStudioPage() {
     }
   }
 
-  /* ── Entity drag — ONLY in hand tool (or via card body click in select) */
+  /* ── Entity drag ──────────────────────────────────────────── */
   const handleEntityPointerDown = (e: React.PointerEvent, idx: number) => {
-    // Ignore button clicks — they should not start a drag
     if ((e.target as HTMLElement).closest('button')) return
     e.stopPropagation()
     if (!selectedOntology) return
@@ -612,7 +644,6 @@ function OntologyStudioPage() {
     const entId = ent.entity_id || String(idx)
 
     if (canvasTool === 'select') {
-      // Select mode: clicking a card selects it, doesn't drag
       if (e.shiftKey) {
         setSelectedEntityIds((prev) =>
           prev.includes(entId)
@@ -625,7 +656,6 @@ function OntologyStudioPage() {
       return
     }
 
-    // Hand tool: drag to move
     const pos = getEntityPos(ent, idx)
     setDraggingEntityIdx(idx)
     dragOffsetRef.current = {
@@ -685,15 +715,17 @@ function OntologyStudioPage() {
 
   const handleAutoLayout = async () => {
     if (!selectedOntology) return
+    const anyExpanded = expandedCanvasCardIds.size > 0
     const cols = Math.max(
       2,
       Math.ceil(Math.sqrt(selectedOntology.entities.length))
     )
+    const rowSpacing = anyExpanded ? 268 : 112
     const nextEntities = selectedOntology.entities.map((ent, idx) => ({
       ...ent,
       position: {
-        x: (idx % cols) * 320 + 50,
-        y: Math.floor(idx / cols) * 280 + 50,
+        x: (idx % cols) * 308 + 48,
+        y: Math.floor(idx / cols) * rowSpacing + 48,
       },
     }))
     const updated = { ...selectedOntology, entities: nextEntities }
@@ -703,13 +735,34 @@ function OntologyStudioPage() {
         o.ontology_version_id === updated.ontology_version_id ? updated : o
       )
     )
-    setTimeout(handleFitView, 50)
+    setTimeout(handleFitView, 40)
     try {
       await ontologyApi.update(selectedOntology.ontology_version_id, {
         entities: nextEntities,
       })
       notify('Layout applied')
     } catch {}
+  }
+
+  const toggleCanvasCardExpand = (id: string) => {
+    setExpandedCanvasCardIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllCanvasCards = () => {
+    if (!selectedOntology) return
+    if (expandedCanvasCardIds.size > 0) {
+      setExpandedCanvasCardIds(new Set())
+    } else {
+      const allIds = selectedOntology.entities.map(
+        (ent, idx) => ent.entity_id || String(idx)
+      )
+      setExpandedCanvasCardIds(new Set(allIds))
+    }
   }
 
   /* ── CRUD ────────────────────────────────────────────────── */
@@ -785,8 +838,8 @@ function OntologyStudioPage() {
       } else {
         const count = selectedOntology.entities.length
         const pos = {
-          x: (count % 3) * 320 + 60,
-          y: Math.floor(count / 3) * 270 + 60,
+          x: (count % 4) * 300 + 48,
+          y: Math.floor(count / 4) * 116 + 48,
         }
         const created = await ontologyApi.addEntity(vId, {
           name: cleanName,
@@ -908,6 +961,8 @@ function OntologyStudioPage() {
       setOntologies((prev) =>
         prev.map((o) => (o.ontology_version_id === vId ? nextOnt : o))
       )
+      const cardId = targetEnt.entity_id || String(attrModalEntityIdx)
+      setExpandedCanvasCardIds((prev) => new Set(prev).add(cardId))
       setAttrModalEntityIdx(null)
       notify('Attribute added')
     } catch (err: any) {
@@ -1051,13 +1106,13 @@ function OntologyStudioPage() {
 
   return (
     <div
-      className="relative h-[calc(100vh-4rem)] w-full overflow-hidden font-sans text-neutral-900 antialiased"
-      style={{ backgroundColor: SURFACE }}
+      className="relative h-[calc(100vh-4rem)] w-full overflow-hidden text-slate-900 antialiased"
+      style={{ backgroundColor: SURFACE, fontFamily: FONT_STACK }}
     >
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white shadow-lg">
-          <Check className="h-3 w-3 text-emerald-400" strokeWidth={2.5} />
+        <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3.5 py-1.5 text-[12px] font-medium text-white shadow-lg">
+          <Check className="h-3.5 w-3.5 text-slate-300" strokeWidth={2.25} />
           <span>{toast}</span>
         </div>
       )}
@@ -1068,14 +1123,14 @@ function OntologyStudioPage() {
           <div className="mx-auto max-w-5xl px-8 py-10">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-neutral-900">
-                  Ontology
+                <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-slate-900">
+                  Ontology Registry
                 </h1>
-                <p className="mt-1 text-[13px] text-neutral-500">
-                  Versioned domain models — {ontologies.length} total
+                <p className="mt-1 text-[13px] text-slate-500">
+                  Versioned domain schemas · {ontologies.length} models
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 {projects.length > 0 && (
                   <div className="w-48">
                     <CustomSelect
@@ -1095,103 +1150,108 @@ function OntologyStudioPage() {
                 <button
                   type="button"
                   onClick={() => loadOntologies()}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900"
+                  className="flex h-8.5 w-8.5 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                  title="Refresh"
                 >
                   <RefreshCw
                     className={`h-3.5 w-3.5 ${loadingList ? 'animate-spin' : ''}`}
-                    strokeWidth={2}
+                    strokeWidth={1.75}
                   />
                 </button>
                 <Link
                   to="/ontology/new"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-neutral-900 px-3 text-[12.5px] font-medium text-white hover:bg-neutral-800"
+                  className="inline-flex h-8.5 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-[12.5px] font-medium text-white shadow-xs transition-colors hover:bg-slate-800"
                 >
-                  <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                  New
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+                  New Model
                 </Link>
               </div>
             </div>
 
-            <div className="mt-6 flex items-center gap-3 border-b border-neutral-200 pb-3">
+            <div className="mt-6 flex items-center gap-3 border-b border-slate-200/80 pb-3.5">
               <div className="relative max-w-sm flex-1">
                 <Search
-                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400"
-                  strokeWidth={2}
+                  className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                  strokeWidth={1.75}
                 />
                 <input
                   type="text"
                   value={registrySearch}
                   onChange={(e) => setRegistrySearch(e.target.value)}
-                  placeholder="Search models…"
-                  className="h-8 w-full rounded-md border border-neutral-200 bg-white pl-8 pr-3 text-[12.5px] text-neutral-900 placeholder:text-neutral-400 outline-none focus:border-neutral-400"
+                  placeholder="Filter by name, domain, or ID…"
+                  className="h-8.5 w-full rounded-lg border border-slate-200 bg-white pl-8.5 pr-3 text-[12.5px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-slate-400"
                 />
               </div>
             </div>
 
             {listError && (
-              <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-700">
-                {listError}
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-[12.5px] text-slate-800 shadow-xs">
+                <AlertCircle className="h-4 w-4 shrink-0 text-slate-700" />
+                <span>{listError}</span>
               </div>
             )}
 
             <div className="mt-4">
               {loadingList ? (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {[1, 2, 3].map((i) => (
                     <div
                       key={i}
-                      className="h-14 animate-pulse rounded-md border border-neutral-200 bg-white"
+                      className="h-16 animate-pulse rounded-xl border border-slate-200 bg-white"
                     />
                   ))}
                 </div>
               ) : filteredOntologies.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-neutral-200 bg-white py-16 text-center">
-                  <Network
-                    className="mx-auto h-5 w-5 text-neutral-300"
-                    strokeWidth={1.5}
-                  />
-                  <h3 className="mt-3 text-[13.5px] font-medium text-neutral-900">
-                    No models yet
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-16 text-center">
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-[#F8FAFC]">
+                    <Network
+                      className="h-4.5 w-4.5 text-slate-500"
+                      strokeWidth={1.75}
+                    />
+                  </div>
+                  <h3 className="mt-3 text-[13.5px] font-medium text-slate-900">
+                    No domain models found
                   </h3>
-                  <p className="mx-auto mt-1 max-w-xs text-[12.5px] text-neutral-500">
-                    Create an ontology to start modeling your domain.
+                  <p className="mx-auto mt-1 max-w-xs text-[12.5px] text-slate-500">
+                    Initialize an ontology schema to define entities and
+                    relations.
                   </p>
                   <Link
                     to="/ontology/new"
-                    className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-neutral-900 px-3.5 text-[12.5px] font-medium text-white hover:bg-neutral-800"
+                    className="mt-4 inline-flex h-8.5 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-[12.5px] font-medium text-white shadow-xs transition-colors hover:bg-slate-800"
                   >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
                     New Ontology
                   </Link>
                 </div>
               ) : (
-                <div className="divide-y divide-neutral-200 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+                <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
                   {filteredOntologies.map((ont) => (
                     <div
                       key={ont.ontology_version_id}
                       onClick={() => openBuilder(ont)}
-                      className="group flex cursor-pointer items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-neutral-50"
+                      className="group flex cursor-pointer items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-[#F8FAFC]"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="truncate text-[13.5px] font-medium text-neutral-900">
+                          <span className="truncate text-[13.5px] font-medium text-slate-900">
                             {ont.name}
                           </span>
-                          <span className="shrink-0 rounded border border-neutral-200 px-1.5 py-0 font-mono text-[10px] text-neutral-500">
+                          <span className="shrink-0 rounded-md border border-slate-200 bg-[#F8FAFC] px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
                             v{ont.version_tag || '1.0.0'}
                           </span>
                         </div>
-                        <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-neutral-500">
+                        <div className="mt-0.5 flex items-center gap-2 text-[12px] text-slate-500">
                           <span>{ont.domain || 'General'}</span>
-                          <span className="text-neutral-300">·</span>
-                          <span className="font-mono tabular-nums">
-                            {ont.entities?.length || 0}e ·{' '}
-                            {ont.relationships?.length || 0}r
+                          <span className="text-slate-300">·</span>
+                          <span className="font-mono text-[11px] tabular-nums">
+                            {ont.entities?.length || 0} entities ·{' '}
+                            {ont.relationships?.length || 0} relations
                           </span>
                         </div>
                       </div>
                       <div
-                        className="flex items-center gap-1"
+                        className="flex items-center gap-1.5"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
@@ -1200,7 +1260,7 @@ function OntologyStudioPage() {
                             e.stopPropagation()
                             openBuilder(ont)
                           }}
-                          className="flex h-7 items-center gap-1 rounded-md px-2.5 text-[12px] font-medium text-neutral-700 hover:bg-neutral-100"
+                          className="flex h-7.5 items-center gap-1 rounded-lg border border-transparent px-2.5 text-[12px] font-medium text-slate-700 transition-colors hover:border-slate-200 hover:bg-white hover:text-slate-900"
                         >
                           Open
                           <ArrowRight className="h-3 w-3" strokeWidth={2} />
@@ -1211,7 +1271,8 @@ function OntologyStudioPage() {
                             e.stopPropagation()
                             setDeleteTarget(ont)
                           }}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 hover:bg-rose-50 hover:text-rose-600"
+                          className="flex h-7.5 w-7.5 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-200/60 hover:text-slate-900"
+                          title="Delete"
                         >
                           <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                         </button>
@@ -1230,35 +1291,38 @@ function OntologyStudioPage() {
         <div className="relative flex h-full w-full flex-col overflow-hidden">
           {loadingOnt || !selectedOntology ? (
             <div className="flex h-full items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
-              <span className="text-[12.5px] text-neutral-500">Loading…</span>
+              <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+              <span className="text-[12.5px] text-slate-500">
+                Loading schema…
+              </span>
             </div>
           ) : (
             <>
               {/* Top bar */}
-              <div className="z-20 flex h-11 items-center justify-between gap-3 border-b border-neutral-200 bg-white px-4">
-                <div className="flex min-w-0 items-center gap-2">
+              <div className="z-20 flex h-12 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <button
                     type="button"
                     onClick={() => setViewMode('registry')}
-                    className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                    title="Back to registry"
                   >
                     <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
-                  <span className="truncate text-[13px] font-medium text-neutral-900">
+                  <span className="truncate text-[13.5px] font-medium text-slate-900">
                     {selectedOntology.name}
                   </span>
-                  <span className="rounded border border-neutral-200 px-1.5 py-0 font-mono text-[10px] text-neutral-500">
+                  <span className="rounded-md border border-slate-200 bg-[#F8FAFC] px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
                     v{selectedOntology.version_tag}
                   </span>
-                  <span className="hidden font-mono text-[11px] tabular-nums text-neutral-400 md:inline">
+                  <span className="hidden font-mono text-[11px] tabular-nums text-slate-400 md:inline">
                     {selectedOntology.entities.length}e ·{' '}
                     {selectedOntology.relationships.length}r
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <div className="mr-2 inline-flex rounded-md bg-neutral-100 p-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="mr-1.5 inline-flex rounded-lg border border-slate-200 bg-[#F8FAFC] p-0.5">
                     {(
                       [
                         { id: 'graph', label: 'Canvas', icon: Network },
@@ -1276,10 +1340,10 @@ function OntologyStudioPage() {
                           key={tab.id}
                           type="button"
                           onClick={() => setActiveTab(tab.id)}
-                          className={`flex h-6 items-center gap-1.5 rounded px-2 text-[11.5px] transition-colors ${
+                          className={`flex h-6.5 items-center gap-1.5 rounded-md px-2.5 text-[11.5px] font-medium transition-all ${
                             active
-                              ? 'bg-white text-neutral-900 shadow-sm'
-                              : 'text-neutral-500 hover:text-neutral-900'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-900'
                           }`}
                         >
                           <tab.icon className="h-3 w-3" strokeWidth={2} />
@@ -1292,15 +1356,15 @@ function OntologyStudioPage() {
                   <button
                     type="button"
                     onClick={openCreateEntityModal}
-                    className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-neutral-700 hover:bg-neutral-100"
+                    className="flex h-7.5 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium text-slate-700 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
                   >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                     Entity
                   </button>
                   <button
                     type="button"
                     onClick={openAddRelationshipModal}
-                    className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-neutral-700 hover:bg-neutral-100"
+                    className="flex h-7.5 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium text-slate-700 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
                   >
                     <Link2 className="h-3.5 w-3.5" strokeWidth={2} />
                     Relation
@@ -1309,7 +1373,7 @@ function OntologyStudioPage() {
                     type="button"
                     onClick={() => handleSaveOntology()}
                     disabled={saving || !dirty}
-                    className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-40"
+                    className="flex h-7.5 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium text-slate-700 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900 disabled:opacity-40"
                   >
                     {saving ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -1318,13 +1382,13 @@ function OntologyStudioPage() {
                     )}
                     {dirty ? 'Save' : 'Saved'}
                   </button>
-                  <div className="mx-1 h-4 w-px bg-neutral-200" />
+                  <div className="mx-1 h-4 w-px bg-slate-200" />
                   <button
                     type="button"
                     onClick={() => setIsAgentOpen(true)}
-                    className="flex h-7 items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 text-[12px] font-medium text-white hover:bg-neutral-800"
+                    className="flex h-7.5 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-[12px] font-medium text-white shadow-xs transition-colors hover:bg-slate-800"
                   >
-                    Agent
+                    Architect
                   </button>
                 </div>
               </div>
@@ -1340,11 +1404,14 @@ function OntologyStudioPage() {
                       onPointerUp={handleCanvasPointerUp}
                       onPointerCancel={handleCanvasPointerUp}
                       style={{
+                        backgroundColor: SURFACE,
                         backgroundImage:
-                          'radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1px)',
-                        backgroundSize: `${GRID_BASE}px ${GRID_BASE}px`,
-                        backgroundPosition: `${pan.x % GRID_BASE}px ${
-                          pan.y % GRID_BASE
+                          'radial-gradient(rgba(15,23,42,0.12) 1px, transparent 1px)',
+                        backgroundSize: `${GRID_BASE * zoom}px ${
+                          GRID_BASE * zoom
+                        }px`,
+                        backgroundPosition: `${pan.x % (GRID_BASE * zoom)}px ${
+                          pan.y % (GRID_BASE * zoom)
                         }px`,
                       }}
                       className={`relative flex-1 select-none touch-none overflow-hidden ${
@@ -1356,16 +1423,16 @@ function OntologyStudioPage() {
                       }`}
                     >
                       {/* Floating toolbar */}
-                      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-neutral-200 bg-white/95 px-1 py-1 shadow-[0_1px_3px_rgba(0,0,0,0.06)] backdrop-blur">
-                        <div className="flex items-center rounded bg-neutral-100 p-0.5">
+                      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur-xs">
+                        <div className="flex items-center rounded-lg bg-[#F8FAFC] p-0.5">
                           <button
                             type="button"
                             onClick={() => setCanvasTool('hand')}
-                            title="Pan"
-                            className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${
+                            title="Pan canvas"
+                            className={`flex h-6.5 w-6.5 items-center justify-center rounded-md transition-all ${
                               canvasTool === 'hand'
-                                ? 'bg-white text-neutral-900 shadow-sm'
-                                : 'text-neutral-500 hover:text-neutral-900'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-500 hover:text-slate-900'
                             }`}
                           >
                             <Hand className="h-3 w-3" strokeWidth={2} />
@@ -1373,11 +1440,11 @@ function OntologyStudioPage() {
                           <button
                             type="button"
                             onClick={() => setCanvasTool('select')}
-                            title="Select"
-                            className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${
+                            title="Select entities"
+                            className={`flex h-6.5 w-6.5 items-center justify-center rounded-md transition-all ${
                               canvasTool === 'select'
-                                ? 'bg-white text-neutral-900 shadow-sm'
-                                : 'text-neutral-500 hover:text-neutral-900'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-500 hover:text-slate-900'
                             }`}
                           >
                             <MousePointer2
@@ -1387,71 +1454,93 @@ function OntologyStudioPage() {
                           </button>
                         </div>
 
-                        <div className="mx-0.5 h-4 w-px bg-neutral-200" />
+                        <div className="mx-1 h-4 w-px bg-slate-200" />
 
                         <button
                           type="button"
-                          onClick={() =>
-                            setZoom((z) =>
-                              Math.max(MIN_ZOOM, +(z - 0.1).toFixed(2))
-                            )
-                          }
-                          className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                          title="Zoom out"
+                          onClick={() => zoomAtCenter(0.87)}
+                          className="flex h-6.5 w-6.5 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                          title="Zoom out (Ctrl -)"
                         >
                           <ZoomOut className="h-3 w-3" strokeWidth={2} />
                         </button>
                         <button
                           type="button"
                           onClick={() => setZoom(1)}
-                          className="min-w-[38px] px-1 text-center font-mono text-[10.5px] tabular-nums text-neutral-600 hover:text-neutral-900"
-                          title="Reset"
+                          className="min-w-[42px] px-1 text-center font-mono text-[10.5px] tabular-nums text-slate-700 hover:text-slate-900"
+                          title="Reset zoom (Ctrl 0)"
                         >
                           {Math.round(zoom * 100)}%
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
-                            setZoom((z) =>
-                              Math.min(MAX_ZOOM, +(z + 0.1).toFixed(2))
-                            )
-                          }
-                          className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                          title="Zoom in"
+                          onClick={() => zoomAtCenter(1.15)}
+                          className="flex h-6.5 w-6.5 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                          title="Zoom in (Ctrl +)"
                         >
                           <ZoomIn className="h-3 w-3" strokeWidth={2} />
                         </button>
                         <button
                           type="button"
                           onClick={handleFitView}
-                          className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                          title="Fit"
+                          className="flex h-6.5 w-6.5 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                          title="Fit to screen"
                         >
                           <Maximize2 className="h-3 w-3" strokeWidth={2} />
                         </button>
 
-                        <div className="mx-0.5 h-4 w-px bg-neutral-200" />
+                        <div className="mx-1 h-4 w-px bg-slate-200" />
+
+                        <button
+                          type="button"
+                          onClick={toggleAllCanvasCards}
+                          className="flex h-6.5 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-slate-600 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                          title={
+                            expandedCanvasCardIds.size > 0
+                              ? 'Collapse all entities'
+                              : 'Expand all entities'
+                          }
+                        >
+                          {expandedCanvasCardIds.size > 0 ? (
+                            <>
+                              <ChevronsDownUp
+                                className="h-3 w-3"
+                                strokeWidth={2}
+                              />
+                              Collapse
+                            </>
+                          ) : (
+                            <>
+                              <ChevronsUpDown
+                                className="h-3 w-3"
+                                strokeWidth={2}
+                              />
+                              Expand
+                            </>
+                          )}
+                        </button>
 
                         <button
                           type="button"
                           onClick={handleAutoLayout}
-                          className="flex h-6 items-center gap-1 rounded px-2 text-[11px] font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
-                          title="Auto-arrange"
+                          className="flex h-6.5 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-slate-600 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
+                          title="Auto-arrange grid"
                         >
                           <LayoutGrid className="h-3 w-3" strokeWidth={2} />
                           Arrange
                         </button>
+
                         <button
                           type="button"
                           onClick={() => setShowMinimap((v) => !v)}
-                          className={`flex h-6 w-6 items-center justify-center rounded ${
+                          className={`flex h-6.5 w-6.5 items-center justify-center rounded-lg transition-colors ${
                             showMinimap
-                              ? 'text-neutral-900'
-                              : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700'
+                              ? 'bg-[#F8FAFC] text-slate-900'
+                              : 'text-slate-400 hover:bg-[#F8FAFC] hover:text-slate-700'
                           }`}
-                          title="Minimap"
+                          title="Toggle minimap"
                         >
-                          <Map className="h-3 w-3" strokeWidth={2} />
+                          <MapIcon className="h-3 w-3" strokeWidth={2} />
                         </button>
                       </div>
 
@@ -1460,10 +1549,11 @@ function OntologyStudioPage() {
                           entities={selectedOntology.entities}
                           selectedEntityIds={selectedEntityIds}
                           getEntityPos={getEntityPos}
+                          getCardHeight={getCardHeight}
                           pan={pan}
                           zoom={zoom}
                           canvasRef={canvasRef}
-                          onMinimapClick={handleMinimapClick}
+                          onPanChange={setPan}
                           onClose={() => setShowMinimap(false)}
                         />
                       )}
@@ -1490,41 +1580,41 @@ function OntologyStudioPage() {
                               selectionBox.currentY - selectionBox.startY
                             ),
                           }}
-                          className="pointer-events-none absolute z-30 border border-neutral-900 bg-neutral-900/5"
+                          className="pointer-events-none absolute z-30 rounded-lg border border-slate-900 bg-slate-900/5"
                         />
                       )}
 
                       {selectedOntology.entities.length === 0 ? (
                         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-                          <div className="pointer-events-auto max-w-sm text-center">
-                            <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-white">
+                          <div className="pointer-events-auto max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-xs">
+                            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-[#F8FAFC]">
                               <Layers
-                                className="h-4 w-4 text-neutral-400"
+                                className="h-4.5 w-4.5 text-slate-600"
                                 strokeWidth={1.75}
                               />
                             </div>
-                            <h3 className="mt-3 text-[13.5px] font-medium text-neutral-900">
-                              Empty canvas
+                            <h3 className="mt-3 text-[13.5px] font-medium text-slate-900">
+                              Empty workspace
                             </h3>
-                            <p className="mt-1 text-[12px] text-neutral-500">
-                              Add entities manually, or let the agent scaffold
-                              your domain.
+                            <p className="mt-1 text-[12px] text-slate-500">
+                              Define entities manually or scaffold your domain
+                              using the Architect.
                             </p>
                             <div className="mt-4 flex items-center justify-center gap-2">
                               <button
                                 type="button"
                                 onClick={openCreateEntityModal}
-                                className="flex h-7 items-center gap-1 rounded-md border border-neutral-200 bg-white px-2.5 text-[12px] font-medium text-neutral-800 hover:bg-neutral-50"
+                                className="flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-800 hover:bg-[#F8FAFC]"
                               >
-                                <Plus className="h-3 w-3" strokeWidth={2.5} />
+                                <Plus className="h-3 w-3" strokeWidth={2.25} />
                                 Entity
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setIsAgentOpen(true)}
-                                className="flex h-7 items-center gap-1.5 rounded-md bg-neutral-900 px-2.5 text-[12px] font-medium text-white hover:bg-neutral-800"
+                                className="flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-[12px] font-medium text-white hover:bg-slate-800"
                               >
-                                Open Agent
+                                Open Architect
                               </button>
                             </div>
                           </div>
@@ -1534,8 +1624,9 @@ function OntologyStudioPage() {
                           style={{
                             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                             transformOrigin: '0 0',
+                            willChange: 'transform',
                           }}
-                          className="relative h-[3000px] w-[3000px]"
+                          className="pointer-events-none relative h-[4000px] w-[4000px]"
                         >
                           <svg
                             className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
@@ -1544,15 +1635,15 @@ function OntologyStudioPage() {
                             <defs>
                               <marker
                                 id="arrow"
-                                markerWidth="8"
-                                markerHeight="8"
-                                refX="7"
-                                refY="4"
+                                markerWidth="7"
+                                markerHeight="7"
+                                refX="6"
+                                refY="3.5"
                                 orient="auto"
                               >
                                 <path
-                                  d="M 0 1 L 7 4 L 0 7 z"
-                                  fill="#737373"
+                                  d="M 0 0.5 L 6.5 3.5 L 0 6.5 z"
+                                  fill="#64748B"
                                 />
                               </marker>
                             </defs>
@@ -1594,28 +1685,36 @@ function OntologyStudioPage() {
                                   tgt,
                                   tIdx >= 0 ? tIdx : 0
                                 )
+                                const sH = getCardHeight(
+                                  src,
+                                  sIdx >= 0 ? sIdx : 0
+                                )
+                                const tH = getCardHeight(
+                                  tgt,
+                                  tIdx >= 0 ? tIdx : 0
+                                )
 
                                 let x1, y1, x2, y2
                                 if (tPos.x >= sPos.x + CARD_W - 20) {
                                   x1 = sPos.x + CARD_W
-                                  y1 = sPos.y + 56
+                                  y1 = sPos.y + Math.min(22, sH / 2)
                                   x2 = tPos.x
-                                  y2 = tPos.y + 56
+                                  y2 = tPos.y + Math.min(22, tH / 2)
                                 } else if (sPos.x >= tPos.x + CARD_W - 20) {
                                   x1 = sPos.x
-                                  y1 = sPos.y + 56
+                                  y1 = sPos.y + Math.min(22, sH / 2)
                                   x2 = tPos.x + CARD_W
-                                  y2 = tPos.y + 56
+                                  y2 = tPos.y + Math.min(22, tH / 2)
                                 } else if (tPos.y > sPos.y) {
                                   x1 = sPos.x + CARD_W / 2
-                                  y1 = sPos.y + CARD_H
+                                  y1 = sPos.y + sH
                                   x2 = tPos.x + CARD_W / 2
                                   y2 = tPos.y
                                 } else {
                                   x1 = sPos.x + CARD_W / 2
                                   y1 = sPos.y
                                   x2 = tPos.x + CARD_W / 2
-                                  y2 = tPos.y + CARD_H
+                                  y2 = tPos.y + tH
                                 }
 
                                 const midX = (x1 + x2) / 2
@@ -1646,8 +1745,8 @@ function OntologyStudioPage() {
                                 const badgeText =
                                   rel.label || rel.cardinality || '1:N'
                                 const badgeW = Math.max(
-                                  56,
-                                  badgeText.length * 6.5 + 14
+                                  54,
+                                  badgeText.length * 6.2 + 16
                                 )
 
                                 return (
@@ -1660,14 +1759,14 @@ function OntologyStudioPage() {
                                     <path
                                       d={d}
                                       fill="none"
-                                      stroke="#FFFFFF"
-                                      strokeWidth={3.5}
+                                      stroke={SURFACE}
+                                      strokeWidth={4}
                                       strokeLinecap="round"
                                     />
                                     <path
                                       d={d}
                                       fill="none"
-                                      stroke="#a3a3a3"
+                                      stroke="#94A3B8"
                                       strokeWidth={1.25}
                                       strokeDasharray={
                                         rel.cardinality?.includes('N:M')
@@ -1681,12 +1780,12 @@ function OntologyStudioPage() {
                                     >
                                       <rect
                                         x={-badgeW / 2}
-                                        y={-8}
+                                        y={-9}
                                         width={badgeW}
-                                        height={16}
-                                        rx={4}
+                                        height={18}
+                                        rx={6}
                                         fill="#FFFFFF"
-                                        stroke="#e5e5e5"
+                                        stroke="#CBD5E1"
                                         strokeWidth={1}
                                       />
                                       <text
@@ -1694,7 +1793,7 @@ function OntologyStudioPage() {
                                         dominantBaseline="central"
                                         fontSize={9.5}
                                         fontFamily="ui-monospace, monospace"
-                                        fill="#525252"
+                                        fill="#334155"
                                         fontWeight={500}
                                       >
                                         {badgeText}
@@ -1707,14 +1806,17 @@ function OntologyStudioPage() {
                           </svg>
 
                           {selectedOntology.entities.map((ent, idx) => {
+                            const entId = ent.entity_id || String(idx)
                             const pos = getEntityPos(ent, idx)
                             const isDragging = draggingEntityIdx === idx
-                            const isSelected = selectedEntityIds.includes(
-                              ent.entity_id || String(idx)
-                            )
+                            const isSelected = selectedEntityIds.includes(entId)
+                            const isCardExpanded =
+                              expandedCanvasCardIds.has(entId)
+                            const attrCount = (ent.attributes || []).length
+
                             return (
                               <div
-                                key={ent.entity_id || ent.name}
+                                key={entId}
                                 onPointerDown={(e) =>
                                   handleEntityPointerDown(e, idx)
                                 }
@@ -1725,108 +1827,144 @@ function OntologyStudioPage() {
                                   transform: `translate(${pos.x}px, ${pos.y}px)`,
                                   width: CARD_W,
                                 }}
-                                className={`absolute top-0 left-0 rounded-lg border bg-white ${
+                                className={`pointer-events-auto absolute top-0 left-0 overflow-hidden rounded-xl border bg-white transition-shadow ${
                                   isSelected
-                                    ? 'z-30 border-neutral-900 shadow-lg ring-2 ring-neutral-900/10'
+                                    ? 'z-30 border-slate-900 shadow-md ring-2 ring-slate-900/10'
                                     : isDragging
-                                    ? 'z-30 cursor-grabbing border-neutral-900 shadow-xl'
-                                    : 'z-10 border-neutral-200 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-neutral-300 cursor-grab'
+                                    ? 'z-30 cursor-grabbing border-slate-900 shadow-lg'
+                                    : 'z-10 border-slate-200 shadow-xs hover:border-slate-300 cursor-grab'
                                 }`}
                               >
-                                <div className="group flex items-center justify-between gap-2 rounded-t-lg border-b border-neutral-100 px-3 py-2">
+                                <div
+                                  className={`group flex items-center justify-between gap-1.5 px-3 py-2.5 ${
+                                    isCardExpanded
+                                      ? 'border-b border-slate-100 bg-[#F8FAFC]'
+                                      : ''
+                                  }`}
+                                >
                                   <div className="flex min-w-0 items-center gap-1.5">
-                                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-900" />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleCanvasCardExpand(entId)
+                                      }}
+                                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/60 hover:text-slate-900"
+                                      title={
+                                        isCardExpanded ? 'Minimize' : 'Expand'
+                                      }
+                                    >
+                                      {isCardExpanded ? (
+                                        <ChevronDown
+                                          className="h-3.5 w-3.5"
+                                          strokeWidth={2}
+                                        />
+                                      ) : (
+                                        <ChevronRight
+                                          className="h-3.5 w-3.5"
+                                          strokeWidth={2}
+                                        />
+                                      )}
+                                    </button>
                                     <span
                                       onDoubleClick={() =>
                                         openEditEntityModal(idx)
                                       }
-                                      className="truncate font-mono text-[12px] font-medium text-neutral-900"
+                                      className="truncate font-mono text-[12px] font-semibold text-slate-900"
                                     >
                                       {ent.name}
                                     </span>
                                   </div>
-                                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        openAddAttributeModal(idx)
-                                      }}
-                                      className="flex h-5 w-5 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
-                                      title="Add attribute"
-                                    >
-                                      <Plus
-                                        className="h-3 w-3"
-                                        strokeWidth={2.5}
-                                      />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        deleteEntity(idx)
-                                      }}
-                                      className="flex h-5 w-5 items-center justify-center rounded text-neutral-400 hover:bg-rose-50 hover:text-rose-600"
-                                      title="Delete"
-                                    >
-                                      <X
-                                        className="h-3 w-3"
-                                        strokeWidth={2.5}
-                                      />
-                                    </button>
+
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    <span className="rounded-md bg-[#F8FAFC] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-slate-500 border border-slate-200/70">
+                                      {attrCount}
+                                    </span>
+                                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          openAddAttributeModal(idx)
+                                        }}
+                                        className="flex h-5 w-5 items-center justify-center rounded-md text-slate-500 hover:bg-slate-200/60 hover:text-slate-900"
+                                        title="Add attribute"
+                                      >
+                                        <Plus
+                                          className="h-3 w-3"
+                                          strokeWidth={2.25}
+                                        />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          deleteEntity(idx)
+                                        }}
+                                        className="flex h-5 w-5 items-center justify-center rounded-md text-slate-500 hover:bg-slate-200/60 hover:text-slate-900"
+                                        title="Delete entity"
+                                      >
+                                        <X
+                                          className="h-3 w-3"
+                                          strokeWidth={2.25}
+                                        />
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="max-h-56 divide-y divide-neutral-100 overflow-y-auto">
-                                  {(ent.attributes || []).length === 0 ? (
-                                    <div className="px-3 py-3 text-center text-[10.5px] text-neutral-400">
-                                      No attributes
-                                    </div>
-                                  ) : (
-                                    ent.attributes.map((attr, aIdx) => (
-                                      <div
-                                        key={`${attr.name}-${aIdx}`}
-                                        className="group/row flex items-center justify-between gap-2 px-3 py-1.5 text-[11.5px] hover:bg-neutral-50"
-                                      >
-                                        <div className="flex min-w-0 items-center gap-1.5">
-                                          {attr.is_pk ? (
-                                            <KeyRound
-                                              className="h-2.5 w-2.5 shrink-0 text-amber-600"
-                                              strokeWidth={2.5}
-                                            />
-                                          ) : attr.is_fk ? (
-                                            <Link2
-                                              className="h-2.5 w-2.5 shrink-0 text-neutral-500"
-                                              strokeWidth={2}
-                                            />
-                                          ) : (
-                                            <span className="w-2.5 shrink-0" />
-                                          )}
-                                          <span className="truncate font-mono text-neutral-800">
-                                            {attr.name}
-                                          </span>
-                                        </div>
-                                        <div className="flex shrink-0 items-center gap-1.5">
-                                          <span className="font-mono text-[10px] text-neutral-400">
-                                            {attr.datatype}
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              deleteAttribute(idx, aIdx)
-                                            }}
-                                            className="hidden text-neutral-300 hover:text-rose-600 group-hover/row:inline-flex"
-                                          >
-                                            <Minus
-                                              className="h-2.5 w-2.5"
-                                              strokeWidth={2.5}
-                                            />
-                                          </button>
-                                        </div>
+
+                                {isCardExpanded && (
+                                  <div className="max-h-44 divide-y divide-slate-100 overflow-y-auto">
+                                    {attrCount === 0 ? (
+                                      <div className="px-3 py-3.5 text-center text-[11px] text-slate-400">
+                                        No attributes
                                       </div>
-                                    ))
-                                  )}
-                                </div>
+                                    ) : (
+                                      ent.attributes.map((attr, aIdx) => (
+                                        <div
+                                          key={`${attr.name}-${aIdx}`}
+                                          className="group/row flex items-center justify-between gap-2 px-3 py-1.5 text-[11px] hover:bg-[#F8FAFC]"
+                                        >
+                                          <div className="flex min-w-0 items-center gap-1.5">
+                                            {attr.is_pk ? (
+                                              <span className="shrink-0 rounded bg-slate-900 px-1 py-0 font-mono text-[8.5px] font-semibold text-white">
+                                                PK
+                                              </span>
+                                            ) : attr.is_fk ? (
+                                              <span className="shrink-0 rounded border border-slate-200 bg-[#F8FAFC] px-1 py-0 font-mono text-[8.5px] font-medium text-slate-700">
+                                                FK
+                                              </span>
+                                            ) : (
+                                              <span className="w-5 shrink-0" />
+                                            )}
+                                            <span className="truncate font-mono text-slate-800">
+                                              {attr.name}
+                                            </span>
+                                          </div>
+                                          <div className="flex shrink-0 items-center gap-1.5">
+                                            <span className="font-mono text-[9.5px] text-slate-400">
+                                              {attr.datatype}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                deleteAttribute(idx, aIdx)
+                                              }}
+                                              className="hidden text-slate-400 hover:text-slate-900 group-hover/row:inline-flex"
+                                              title="Remove attribute"
+                                            >
+                                              <Minus
+                                                className="h-2.5 w-2.5"
+                                                strokeWidth={2.5}
+                                              />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )
                           })}
@@ -1838,10 +1976,10 @@ function OntologyStudioPage() {
                   {/* ── ENTITIES TABLE (collapsible) ── */}
                   {activeTab === 'table' && (
                     <div className="flex-1 overflow-y-auto">
-                      <div className="mx-auto max-w-5xl space-y-3 p-6">
+                      <div className="mx-auto max-w-5xl space-y-2.5 p-6">
                         {selectedOntology.entities.length === 0 && (
-                          <div className="rounded-lg border border-dashed border-neutral-200 bg-white py-16 text-center text-[12.5px] text-neutral-500">
-                            No entities yet
+                          <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-16 text-center text-[12.5px] text-slate-500">
+                            No entities defined
                           </div>
                         )}
                         {selectedOntology.entities.map((ent, idx) => {
@@ -1851,9 +1989,9 @@ function OntologyStudioPage() {
                           return (
                             <div
                               key={id}
-                              className="overflow-hidden rounded-lg border border-neutral-200 bg-white"
+                              className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs"
                             >
-                              <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                              <div className="flex items-center justify-between gap-3 px-4 py-3">
                                 <button
                                   type="button"
                                   onClick={() => toggleEntityExpand(id)}
@@ -1861,26 +1999,26 @@ function OntologyStudioPage() {
                                 >
                                   {open ? (
                                     <ChevronDown
-                                      className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+                                      className="h-3.5 w-3.5 shrink-0 text-slate-500"
                                       strokeWidth={2}
                                     />
                                   ) : (
                                     <ChevronRight
-                                      className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+                                      className="h-3.5 w-3.5 shrink-0 text-slate-500"
                                       strokeWidth={2}
                                     />
                                   )}
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-2">
-                                      <span className="truncate font-mono text-[12.5px] font-medium text-neutral-900">
+                                      <span className="truncate font-mono text-[12.5px] font-medium text-slate-900">
                                         {ent.name}
                                       </span>
-                                      <span className="shrink-0 font-mono text-[10.5px] text-neutral-400">
+                                      <span className="shrink-0 rounded-md border border-slate-200 bg-[#F8FAFC] px-1.5 py-0 font-mono text-[10px] text-slate-500">
                                         {attrCount} attr
                                       </span>
                                     </div>
                                     {ent.description && (
-                                      <div className="truncate text-[11.5px] text-neutral-500">
+                                      <div className="truncate text-[12px] text-slate-500">
                                         {ent.description}
                                       </div>
                                     )}
@@ -1893,11 +2031,11 @@ function OntologyStudioPage() {
                                       e.stopPropagation()
                                       openAddAttributeModal(idx)
                                     }}
-                                    className="flex h-6 items-center gap-1 rounded px-2 text-[11px] font-medium text-neutral-600 hover:bg-neutral-100"
+                                    className="flex h-7 items-center gap-1 rounded-lg px-2.5 text-[11.5px] font-medium text-slate-600 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
                                   >
                                     <Plus
                                       className="h-3 w-3"
-                                      strokeWidth={2.5}
+                                      strokeWidth={2.25}
                                     />
                                     Attribute
                                   </button>
@@ -1907,10 +2045,10 @@ function OntologyStudioPage() {
                                       e.stopPropagation()
                                       deleteEntity(idx)
                                     }}
-                                    className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-rose-50 hover:text-rose-600"
+                                    className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
                                   >
                                     <Trash2
-                                      className="h-3 w-3"
+                                      className="h-3.5 w-3.5"
                                       strokeWidth={1.75}
                                     />
                                   </button>
@@ -1918,69 +2056,69 @@ function OntologyStudioPage() {
                               </div>
 
                               {open && (
-                                <div className="border-t border-neutral-100">
+                                <div className="border-t border-slate-200">
                                   <table className="w-full text-left text-[12px]">
                                     <thead>
-                                      <tr className="bg-neutral-50 text-[10px] uppercase tracking-wider text-neutral-400">
-                                        <th className="px-4 py-1.5 font-medium">
+                                      <tr className="bg-[#F8FAFC] text-[10px] uppercase tracking-wider text-slate-500">
+                                        <th className="px-4 py-2 font-medium">
                                           Attribute
                                         </th>
-                                        <th className="px-4 py-1.5 font-medium">
+                                        <th className="px-4 py-2 font-medium">
                                           Type
                                         </th>
-                                        <th className="px-4 py-1.5 font-medium">
+                                        <th className="px-4 py-2 font-medium">
                                           Key
                                         </th>
-                                        <th className="px-4 py-1.5 font-medium">
-                                          Null
+                                        <th className="px-4 py-2 font-medium">
+                                          Nullable
                                         </th>
-                                        <th className="px-4 py-1.5"></th>
+                                        <th className="px-4 py-2"></th>
                                       </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-neutral-100">
+                                    <tbody className="divide-y divide-slate-100">
                                       {(ent.attributes || []).map(
                                         (attr, aIdx) => (
                                           <tr
                                             key={`${attr.name}-${aIdx}`}
-                                            className="group"
+                                            className="group hover:bg-[#F8FAFC]"
                                           >
-                                            <td className="px-4 py-1.5 font-mono text-neutral-900">
+                                            <td className="px-4 py-2 font-mono text-slate-900">
                                               {attr.name}
                                             </td>
-                                            <td className="px-4 py-1.5 font-mono text-neutral-500">
+                                            <td className="px-4 py-2 font-mono text-slate-500">
                                               {attr.datatype}
                                             </td>
-                                            <td className="px-4 py-1.5">
+                                            <td className="px-4 py-2">
                                               {attr.is_pk ? (
-                                                <span className="font-mono text-[10px] font-medium text-amber-700">
+                                                <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[9.5px] font-medium text-white">
                                                   PK
                                                 </span>
                                               ) : attr.is_fk ? (
-                                                <span className="font-mono text-[10px] font-medium text-neutral-600">
+                                                <span className="rounded border border-slate-200 bg-[#F8FAFC] px-1.5 py-0.5 font-mono text-[9.5px] font-medium text-slate-700">
                                                   FK
                                                 </span>
                                               ) : (
-                                                <span className="text-neutral-300">
+                                                <span className="text-slate-300">
                                                   —
                                                 </span>
                                               )}
                                             </td>
-                                            <td className="px-4 py-1.5 font-mono text-[11px] text-neutral-500">
+                                            <td className="px-4 py-2 font-mono text-[11px] text-slate-500">
                                               {attr.nullable === false
                                                 ? 'no'
                                                 : 'yes'}
                                             </td>
-                                            <td className="px-4 py-1.5 text-right">
+                                            <td className="px-4 py-2 text-right">
                                               <button
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
                                                   deleteAttribute(idx, aIdx)
                                                 }}
-                                                className="text-neutral-300 opacity-0 hover:text-rose-600 group-hover:opacity-100"
+                                                className="text-slate-400 opacity-0 hover:text-slate-900 group-hover:opacity-100"
                                               >
                                                 <Trash2
-                                                  className="inline h-3 w-3"
+                                                  className="inline h-3.5 w-3.5"
                                                   strokeWidth={1.75}
                                                 />
                                               </button>
@@ -1992,7 +2130,7 @@ function OntologyStudioPage() {
                                         <tr>
                                           <td
                                             colSpan={5}
-                                            className="px-4 py-4 text-center text-[11.5px] text-neutral-400"
+                                            className="px-4 py-4 text-center text-[11.5px] text-slate-400"
                                           >
                                             No attributes
                                           </td>
@@ -2013,13 +2151,13 @@ function OntologyStudioPage() {
                   {activeTab === 'relationships' && (
                     <div className="flex-1 overflow-y-auto">
                       <div className="mx-auto max-w-5xl p-6">
-                        <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
+                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
                           {selectedOntology.relationships.length === 0 ? (
-                            <div className="py-16 text-center text-[12px] text-neutral-500">
-                              No relationships
+                            <div className="py-16 text-center text-[12.5px] text-slate-500">
+                              No relationships defined
                             </div>
                           ) : (
-                            <div className="divide-y divide-neutral-100">
+                            <div className="divide-y divide-slate-200">
                               {selectedOntology.relationships.map(
                                 (rel, idx) => {
                                   const id =
@@ -2035,7 +2173,7 @@ function OntologyStudioPage() {
                                     '—'
                                   return (
                                     <div key={id}>
-                                      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                                      <div className="flex items-center justify-between gap-3 px-4 py-3">
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -2052,26 +2190,26 @@ function OntologyStudioPage() {
                                         >
                                           {open ? (
                                             <ChevronDown
-                                              className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+                                              className="h-3.5 w-3.5 shrink-0 text-slate-500"
                                               strokeWidth={2}
                                             />
                                           ) : (
                                             <ChevronRight
-                                              className="h-3.5 w-3.5 shrink-0 text-neutral-400"
+                                              className="h-3.5 w-3.5 shrink-0 text-slate-500"
                                               strokeWidth={2}
                                             />
                                           )}
-                                          <span className="truncate font-mono text-[12px] text-neutral-900">
+                                          <span className="truncate font-mono text-[12px] text-slate-900">
                                             {src}
                                           </span>
                                           <ArrowRight
-                                            className="h-3 w-3 shrink-0 text-neutral-400"
+                                            className="h-3 w-3 shrink-0 text-slate-400"
                                             strokeWidth={2}
                                           />
-                                          <span className="truncate font-mono text-[12px] text-neutral-900">
+                                          <span className="truncate font-mono text-[12px] text-slate-900">
                                             {tgt}
                                           </span>
-                                          <span className="shrink-0 rounded border border-neutral-200 px-1.5 py-0 font-mono text-[10px] text-neutral-500">
+                                          <span className="shrink-0 rounded-md border border-slate-200 bg-[#F8FAFC] px-1.5 py-0 font-mono text-[10px] text-slate-600">
                                             {rel.cardinality || '1:N'}
                                           </span>
                                         </button>
@@ -2081,45 +2219,45 @@ function OntologyStudioPage() {
                                             e.stopPropagation()
                                             deleteRelationship(idx)
                                           }}
-                                          className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-rose-50 hover:text-rose-600"
+                                          className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
                                         >
                                           <Trash2
-                                            className="h-3 w-3"
+                                            className="h-3.5 w-3.5"
                                             strokeWidth={1.75}
                                           />
                                         </button>
                                       </div>
                                       {open && (
-                                        <div className="grid grid-cols-2 gap-x-6 gap-y-1 border-t border-neutral-100 bg-neutral-50/60 px-11 py-2.5 text-[11.5px]">
+                                        <div className="grid grid-cols-2 gap-x-6 gap-y-2 border-t border-slate-100 bg-[#F8FAFC] px-11 py-3.5 text-[11.5px]">
                                           <div>
-                                            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
+                                            <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                               Source
                                             </div>
-                                            <div className="font-mono text-neutral-900">
+                                            <div className="font-mono text-slate-900">
                                               {src}
                                             </div>
                                           </div>
                                           <div>
-                                            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
+                                            <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                               Target
                                             </div>
-                                            <div className="font-mono text-neutral-900">
+                                            <div className="font-mono text-slate-900">
                                               {tgt}
                                             </div>
                                           </div>
                                           <div>
-                                            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
+                                            <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                               Cardinality
                                             </div>
-                                            <div className="font-mono text-neutral-700">
+                                            <div className="font-mono text-slate-700">
                                               {rel.cardinality || '1:N'}
                                             </div>
                                           </div>
                                           <div>
-                                            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
+                                            <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                               Label
                                             </div>
-                                            <div className="text-neutral-700">
+                                            <div className="text-slate-700">
                                               {rel.label || '—'}
                                             </div>
                                           </div>
@@ -2165,13 +2303,14 @@ function OntologyStudioPage() {
       {/* ── MODALS ─────────────────────────────────────────── */}
       {entityModalOpen && (
         <ModalShell onClose={() => setEntityModalOpen(false)}>
-          <form onSubmit={saveEntityModal} className="w-full max-w-sm">
+          <form onSubmit={saveEntityModal} className="w-full max-w-md">
             <ModalHeader
               title={editingEntityIdx !== null ? 'Edit entity' : 'New entity'}
+              subtitle="Define a domain object node on the ontology canvas."
               onClose={() => setEntityModalOpen(false)}
             />
-            <div className="space-y-3 p-4 text-[12.5px]">
-              <Field label="Name">
+            <div className="space-y-4 p-5 text-[13px]">
+              <Field label="Entity Name">
                 <input
                   type="text"
                   required
@@ -2179,7 +2318,7 @@ function OntologyStudioPage() {
                   value={entityNameInput}
                   onChange={(e) => setEntityNameInput(e.target.value)}
                   placeholder="SalesOrder"
-                  className="h-8 w-full rounded-md border border-neutral-200 px-2.5 font-mono text-[12.5px] outline-none focus:border-neutral-400"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-[12.5px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-slate-900"
                 />
               </Field>
               <Field label="Description">
@@ -2187,14 +2326,14 @@ function OntologyStudioPage() {
                   type="text"
                   value={entityDescInput}
                   onChange={(e) => setEntityDescInput(e.target.value)}
-                  placeholder="Optional"
-                  className="h-8 w-full rounded-md border border-neutral-200 px-2.5 text-[12.5px] outline-none focus:border-neutral-400"
+                  placeholder="Optional domain context"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-slate-900"
                 />
               </Field>
             </div>
             <ModalFooter
               onCancel={() => setEntityModalOpen(false)}
-              submitLabel="Save"
+              submitLabel="Save Entity"
             />
           </form>
         </ModalShell>
@@ -2202,13 +2341,14 @@ function OntologyStudioPage() {
 
       {attrModalEntityIdx !== null && (
         <ModalShell onClose={() => setAttrModalEntityIdx(null)}>
-          <form onSubmit={saveAttributeModal} className="w-full max-w-sm">
+          <form onSubmit={saveAttributeModal} className="w-full max-w-md">
             <ModalHeader
               title="Add attribute"
+              subtitle="Append a typed field or key constraint to this entity."
               onClose={() => setAttrModalEntityIdx(null)}
             />
-            <div className="space-y-3 p-4 text-[12.5px]">
-              <Field label="Name">
+            <div className="space-y-4 p-5 text-[13px]">
+              <Field label="Attribute Name">
                 <input
                   type="text"
                   required
@@ -2216,10 +2356,10 @@ function OntologyStudioPage() {
                   value={attrName}
                   onChange={(e) => setAttrName(e.target.value)}
                   placeholder="customer_id"
-                  className="h-8 w-full rounded-md border border-neutral-200 px-2.5 font-mono text-[12.5px] outline-none focus:border-neutral-400"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-[12.5px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-slate-900"
                 />
               </Field>
-              <Field label="Type">
+              <Field label="Data Type">
                 <CustomSelect
                   value={attrType}
                   onChange={setAttrType}
@@ -2236,7 +2376,7 @@ function OntologyStudioPage() {
                   ]}
                 />
               </Field>
-              <div className="flex flex-wrap gap-3 pt-1">
+              <div className="flex flex-wrap gap-4 rounded-xl border border-slate-200/80 bg-[#F8FAFC] px-3.5 py-2.5">
                 <Checkbox
                   label="Primary key"
                   checked={attrIsPk}
@@ -2256,7 +2396,7 @@ function OntologyStudioPage() {
             </div>
             <ModalFooter
               onCancel={() => setAttrModalEntityIdx(null)}
-              submitLabel="Add"
+              submitLabel="Add Attribute"
             />
           </form>
         </ModalShell>
@@ -2264,21 +2404,22 @@ function OntologyStudioPage() {
 
       {relModalOpen && selectedOntology && (
         <ModalShell onClose={() => setRelModalOpen(false)}>
-          <form onSubmit={saveRelationshipModal} className="w-full max-w-sm">
+          <form onSubmit={saveRelationshipModal} className="w-full max-w-md">
             <ModalHeader
               title="Add relationship"
+              subtitle="Connect two entities with directional cardinality."
               onClose={() => setRelModalOpen(false)}
             />
-            <div className="space-y-3 p-4 text-[12.5px]">
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Source">
+            <div className="space-y-4 p-5 text-[13px]">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Source Entity">
                   <CustomSelect
                     value={relSource}
                     onChange={setRelSource}
                     options={selectedOntology.entities.map((e) => e.name)}
                   />
                 </Field>
-                <Field label="Target">
+                <Field label="Target Entity">
                   <CustomSelect
                     value={relTarget}
                     onChange={setRelTarget}
@@ -2286,7 +2427,7 @@ function OntologyStudioPage() {
                   />
                 </Field>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <Field label="Cardinality">
                   <CustomSelect
                     value={relCardinality}
@@ -2294,20 +2435,20 @@ function OntologyStudioPage() {
                     options={['1:1', '1:N', 'N:1', 'N:M']}
                   />
                 </Field>
-                <Field label="Label">
+                <Field label="Relation Label">
                   <input
                     type="text"
                     value={relLabel}
                     onChange={(e) => setRelLabel(e.target.value)}
                     placeholder="has"
-                    className="h-8 w-full rounded-md border border-neutral-200 px-2.5 text-[12.5px] outline-none focus:border-neutral-400"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] text-slate-900 placeholder:text-slate-400 outline-none transition-colors focus:border-slate-900"
                   />
                 </Field>
               </div>
             </div>
             <ModalFooter
               onCancel={() => setRelModalOpen(false)}
-              submitLabel="Add"
+              submitLabel="Add Relationship"
             />
           </form>
         </ModalShell>
@@ -2315,26 +2456,27 @@ function OntologyStudioPage() {
 
       {deleteTarget && (
         <ModalShell onClose={() => !deleting && setDeleteTarget(null)}>
-          <div className="w-full max-w-sm">
-            <div className="flex items-start gap-3 p-5">
-              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-600">
-                <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
+          <div className="w-full max-w-md">
+            <div className="flex items-start gap-3.5 p-5">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-[#F8FAFC] text-slate-900">
+                <AlertCircle className="h-4 w-4" strokeWidth={2} />
               </div>
               <div>
-                <h3 className="text-[13.5px] font-semibold text-neutral-900">
+                <h3 className="text-[14px] font-semibold text-slate-900">
                   Delete "{deleteTarget.name}"?
                 </h3>
-                <p className="mt-1 text-[12px] leading-relaxed text-neutral-500">
-                  This removes the ontology and all its entities permanently.
+                <p className="mt-1 text-[12.5px] leading-relaxed text-slate-500">
+                  This permanently removes this ontology version along with all
+                  entities and relationships.
                 </p>
               </div>
             </div>
-            <div className="flex justify-end gap-2 border-t border-neutral-100 bg-neutral-50 px-4 py-2.5">
+            <div className="flex justify-end gap-2 border-t border-slate-200/80 bg-[#F8FAFC] px-5 py-3">
               <button
                 type="button"
                 disabled={deleting}
                 onClick={() => setDeleteTarget(null)}
-                className="h-7 rounded-md border border-neutral-200 bg-white px-3 text-[12px] font-medium text-neutral-700 hover:bg-neutral-50"
+                className="h-8 rounded-lg border border-slate-200 bg-white px-3.5 text-[12px] font-medium text-slate-700 transition-colors hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -2342,7 +2484,7 @@ function OntologyStudioPage() {
                 type="button"
                 disabled={deleting}
                 onClick={handleConfirmDelete}
-                className="flex h-7 items-center gap-1.5 rounded-md bg-rose-600 px-3 text-[12px] font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+                className="flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 text-[12px] font-medium text-white shadow-xs transition-colors hover:bg-slate-800 disabled:opacity-60"
               >
                 {deleting && <Loader2 className="h-3 w-3 animate-spin" />}
                 Delete
@@ -2356,27 +2498,32 @@ function OntologyStudioPage() {
 }
 
 /* ────────────────────────────────────────────────────────────
-   MINIMAP
+   SMOOTH INTERACTIVE MINIMAP (CLICK + DRAG SCRUBBING)
    ──────────────────────────────────────────────────────────── */
 function Minimap({
   entities,
   selectedEntityIds,
   getEntityPos,
+  getCardHeight,
   pan,
   zoom,
   canvasRef,
-  onMinimapClick,
+  onPanChange,
   onClose,
 }: {
   entities: OntologyEntity[]
   selectedEntityIds: string[]
   getEntityPos: (ent: OntologyEntity, idx: number) => { x: number; y: number }
+  getCardHeight: (ent: OntologyEntity, idx: number) => number
   pan: { x: number; y: number }
   zoom: number
   canvasRef: React.RefObject<HTMLDivElement | null>
-  onMinimapClick: (e: React.MouseEvent<HTMLDivElement>) => void
+  onPanChange: (nextPan: { x: number; y: number }) => void
   onClose: () => void
 }) {
+  const mapContainerRef = useRef<HTMLDivElement>(null)
+  const isScrubbingRef = useRef(false)
+
   const bounds = useMemo(() => {
     let minX = Infinity,
       minY = Infinity,
@@ -2384,68 +2531,113 @@ function Minimap({
       maxY = -Infinity
     entities.forEach((ent, i) => {
       const pos = getEntityPos(ent, i)
+      const h = getCardHeight(ent, i)
       if (pos.x < minX) minX = pos.x
       if (pos.y < minY) minY = pos.y
       if (pos.x + CARD_W > maxX) maxX = pos.x + CARD_W
-      if (pos.y + CARD_H > maxY) maxY = pos.y + CARD_H
+      if (pos.y + h > maxY) maxY = pos.y + h
     })
-    const pad = 80
+    const pad = 120
     return {
       minX: minX - pad,
       minY: minY - pad,
-      w: Math.max(600, maxX - minX + pad * 2),
-      h: Math.max(400, maxY - minY + pad * 2),
+      w: Math.max(800, maxX - minX + pad * 2),
+      h: Math.max(520, maxY - minY + pad * 2),
     }
-  }, [entities, getEntityPos])
+  }, [entities, getEntityPos, getCardHeight])
 
   const scale = Math.min(MINIMAP_W / bounds.w, MINIMAP_H / bounds.h)
   const clientW = canvasRef.current?.clientWidth || 1000
   const clientH = canvasRef.current?.clientHeight || 700
   const vpX = (-pan.x / zoom - bounds.minX) * scale
   const vpY = (-pan.y / zoom - bounds.minY) * scale
-  const vpW = Math.max(14, (clientW / zoom) * scale)
-  const vpH = Math.max(10, (clientH / zoom) * scale)
+  const vpW = Math.max(16, (clientW / zoom) * scale)
+  const vpH = Math.max(12, (clientH / zoom) * scale)
+
+  const scrubToPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!mapContainerRef.current) return
+      const rect = mapContainerRef.current.getBoundingClientRect()
+      const clickX = Math.max(0, Math.min(MINIMAP_W, clientX - rect.left))
+      const clickY = Math.max(0, Math.min(MINIMAP_H, clientY - rect.top))
+      const targetWorldX = bounds.minX + clickX / scale
+      const targetWorldY = bounds.minY + clickY / scale
+      const cw = canvasRef.current?.clientWidth || 1000
+      const ch = canvasRef.current?.clientHeight || 700
+      onPanChange({
+        x: Math.round(cw / 2 - targetWorldX * zoom),
+        y: Math.round(ch / 2 - targetWorldY * zoom),
+      })
+    },
+    [bounds, scale, zoom, canvasRef, onPanChange]
+  )
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    isScrubbingRef.current = true
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    scrubToPointer(e.clientX, e.clientY)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbingRef.current) return
+    e.stopPropagation()
+    scrubToPointer(e.clientX, e.clientY)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbingRef.current) return
+    e.stopPropagation()
+    isScrubbingRef.current = false
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {}
+  }
 
   return (
-    <div className="absolute bottom-4 right-4 z-20 overflow-hidden rounded-md border border-neutral-200 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
-      <div className="flex items-center justify-between border-b border-neutral-100 px-2 py-1">
-        <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-400">
-          Map
+    <div className="absolute bottom-4 right-4 z-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-slate-100 px-2.5 py-1.5">
+        <span className="font-mono text-[9.5px] uppercase tracking-wider text-slate-500">
+          Overview
         </span>
         <button
           type="button"
           onClick={onClose}
-          className="text-neutral-300 hover:text-neutral-700"
+          className="text-slate-400 hover:text-slate-900"
         >
-          <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+          <X className="h-3 w-3" strokeWidth={2.25} />
         </button>
       </div>
       <div
-        onClick={onMinimapClick}
-        style={{ width: MINIMAP_W, height: MINIMAP_H }}
-        className="relative cursor-crosshair select-none bg-neutral-50"
+        ref={mapContainerRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        style={{ width: MINIMAP_W, height: MINIMAP_H, backgroundColor: SURFACE }}
+        className="relative cursor-grab active:cursor-grabbing select-none touch-none"
       >
         {entities.map((ent, idx) => {
           const pos = getEntityPos(ent, idx)
+          const cardH = getCardHeight(ent, idx)
           const x = (pos.x - bounds.minX) * scale
           const y = (pos.y - bounds.minY) * scale
           const w = Math.max(10, CARD_W * scale)
-          const h = Math.max(6, CARD_H * scale)
+          const h = Math.max(4, cardH * scale)
           const isSel = selectedEntityIds.includes(ent.entity_id || String(idx))
           return (
             <div
               key={ent.entity_id || idx}
               style={{ left: x, top: y, width: w, height: h }}
-              className={`absolute rounded-sm ${
-                isSel ? 'bg-neutral-900' : 'bg-neutral-300'
+              className={`pointer-events-none absolute rounded-[2px] ${
+                isSel ? 'bg-slate-900' : 'bg-slate-400/70'
               }`}
-              title={ent.name}
             />
           )
         })}
         <div
           style={{ left: vpX, top: vpY, width: vpW, height: vpH }}
-          className="pointer-events-none absolute rounded-sm border border-neutral-900 bg-neutral-900/5"
+          className="pointer-events-none absolute rounded-[3px] border border-slate-900 bg-slate-900/10"
         />
       </div>
     </div>
@@ -2453,7 +2645,7 @@ function Minimap({
 }
 
 /* ────────────────────────────────────────────────────────────
-   PRIMITIVES
+   PRIMITIVES (ELEVATED ROUNDED MODALS)
    ──────────────────────────────────────────────────────────── */
 function ModalShell({
   children,
@@ -2465,11 +2657,12 @@ function ModalShell({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-[1px]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4 backdrop-blur-[2px]"
+      style={{ fontFamily: FONT_STACK }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-xl"
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
         {children}
       </div>
@@ -2479,20 +2672,29 @@ function ModalShell({
 
 function ModalHeader({
   title,
+  subtitle,
   onClose,
 }: {
   title: string
+  subtitle?: string
   onClose: () => void
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-2.5">
-      <h3 className="text-[13px] font-medium text-neutral-900">{title}</h3>
+    <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+      <div>
+        <h3 className="text-[14.5px] font-semibold tracking-[-0.01em] text-slate-900">
+          {title}
+        </h3>
+        {subtitle && (
+          <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p>
+        )}
+      </div>
       <button
         type="button"
         onClick={onClose}
-        className="text-neutral-400 hover:text-neutral-900"
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-[#F8FAFC] hover:text-slate-900"
       >
-        <X className="h-3.5 w-3.5" strokeWidth={2} />
+        <X className="h-4 w-4" strokeWidth={2} />
       </button>
     </div>
   )
@@ -2506,17 +2708,17 @@ function ModalFooter({
   submitLabel: string
 }) {
   return (
-    <div className="flex justify-end gap-2 border-t border-neutral-100 bg-neutral-50 px-4 py-2.5">
+    <div className="flex justify-end gap-2 border-t border-slate-200/80 bg-[#F8FAFC] px-5 py-3">
       <button
         type="button"
         onClick={onCancel}
-        className="h-7 rounded-md border border-neutral-200 bg-white px-3 text-[12px] font-medium text-neutral-700 hover:bg-neutral-50"
+        className="h-8 rounded-lg border border-slate-200 bg-white px-3.5 text-[12px] font-medium text-slate-700 transition-colors hover:bg-slate-50"
       >
         Cancel
       </button>
       <button
         type="submit"
-        className="h-7 rounded-md bg-neutral-900 px-3 text-[12px] font-medium text-white hover:bg-neutral-800"
+        className="h-8 rounded-lg bg-slate-900 px-3.5 text-[12px] font-medium text-white shadow-xs transition-colors hover:bg-slate-800"
       >
         {submitLabel}
       </button>
@@ -2533,7 +2735,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[11px] font-medium text-neutral-600">
+      <label className="mb-1.5 block text-[11.5px] font-medium text-slate-700">
         {label}
       </label>
       {children}
@@ -2551,12 +2753,12 @@ function Checkbox({
   onChange: (v: boolean) => void
 }) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-700">
+    <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-slate-700">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-3 w-3 accent-neutral-900"
+        className="h-3.5 w-3.5 rounded accent-slate-900"
       />
       {label}
     </label>
@@ -2564,7 +2766,7 @@ function Checkbox({
 }
 
 /* ────────────────────────────────────────────────────────────
-   AGENT
+   AGENT WORKSPACE
    ──────────────────────────────────────────────────────────── */
 interface ChatTurn {
   id: string
@@ -2586,16 +2788,16 @@ interface ChatSession {
 
 const PROMPT_SUGGESTIONS = [
   {
-    title: 'Inspect canvas',
+    title: 'Inspect schema',
     prompt:
       'Summarize what entities, attributes, and relationships are currently modeled.',
   },
   {
-    title: 'Extend model',
+    title: 'Extend domain',
     prompt: 'Add 4 missing business entities with appropriate foreign keys.',
   },
   {
-    title: 'Audit columns',
+    title: 'Audit timestamps',
     prompt: 'Add created_at and updated_at to all entities.',
   },
   {
@@ -2927,18 +3129,19 @@ function ArchitectWorkspace({
 
   return (
     <div
+      style={{ fontFamily: FONT_STACK }}
       className={
         isExpanded
-          ? 'fixed inset-0 z-50 flex flex-col bg-white text-neutral-900'
-          : 'relative flex h-full w-full shrink-0 flex-col border-l border-neutral-200 bg-white text-neutral-900 sm:w-[440px] md:w-[480px]'
+          ? 'fixed inset-0 z-50 flex flex-col bg-white text-slate-900'
+          : 'relative flex h-full w-full shrink-0 flex-col border-l border-slate-200 bg-white text-slate-900 sm:w-[440px] md:w-[480px]'
       }
     >
-      <header className="flex h-11 items-center justify-between gap-2 border-b border-neutral-200 px-3">
+      <header className="flex h-12 items-center justify-between gap-2 border-b border-slate-200 px-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setHistoryRailOpen((v) => !v)}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-[#F8FAFC] hover:text-slate-900"
             title="Sessions"
           >
             {historyRailOpen ? (
@@ -2947,24 +3150,24 @@ function ArchitectWorkspace({
               <PanelLeftOpen className="h-3.5 w-3.5" strokeWidth={2} />
             )}
           </button>
-          <span className="text-[12.5px] font-medium text-neutral-900">
-            Agent
+          <span className="text-[13px] font-medium text-slate-900">
+            Schema Architect
           </span>
-          <span className="font-mono text-[10.5px] text-neutral-400">
+          <span className="font-mono text-[10px] text-slate-400">
             llama-3.3-70b
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <div className="inline-flex rounded bg-neutral-100 p-0.5">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-[#F8FAFC] p-0.5">
             {(['action', 'plan'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
-                className={`h-5 rounded px-1.5 text-[10.5px] font-medium ${
+                className={`h-5.5 rounded-md px-2 text-[10.5px] font-medium transition-all ${
                   mode === m
-                    ? 'bg-white text-neutral-900 shadow-sm'
-                    : 'text-neutral-500 hover:text-neutral-900'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
                 {m === 'action' ? 'Act' : 'Plan'}
@@ -2975,27 +3178,27 @@ function ArchitectWorkspace({
             type="button"
             disabled={turns.length === 0}
             onClick={handleClearChat}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-30"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-[#F8FAFC] hover:text-slate-800 disabled:opacity-30"
             title="Clear"
           >
-            <Trash2 className="h-3 w-3" strokeWidth={1.75} />
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
           <button
             type="button"
             onClick={() => setIsExpanded((v) => !v)}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-[#F8FAFC] hover:text-slate-900"
             title={isExpanded ? 'Collapse' : 'Expand'}
           >
             {isExpanded ? (
-              <Shrink className="h-3 w-3" strokeWidth={2} />
+              <Shrink className="h-3.5 w-3.5" strokeWidth={2} />
             ) : (
-              <Expand className="h-3 w-3" strokeWidth={2} />
+              <Expand className="h-3.5 w-3.5" strokeWidth={2} />
             )}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-[#F8FAFC] hover:text-slate-900"
             title="Close"
           >
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -3008,11 +3211,11 @@ function ArchitectWorkspace({
           <>
             <div
               onClick={() => setHistoryRailOpen(false)}
-              className="absolute inset-0 z-10 bg-black/10"
+              className="absolute inset-0 z-10 bg-slate-950/10"
             />
-            <aside className="absolute inset-y-0 left-0 z-20 flex w-56 flex-col border-r border-neutral-200 bg-white shadow-lg">
-              <div className="flex items-center justify-between border-b border-neutral-100 px-2.5 py-2">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-neutral-400">
+            <aside className="absolute inset-y-0 left-0 z-20 flex w-60 flex-col border-r border-slate-200 bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
                   Sessions
                 </span>
                 <button
@@ -3028,7 +3231,7 @@ function ArchitectWorkspace({
                     setActiveSessionId(next.id)
                     setHistoryRailOpen(false)
                   }}
-                  className="flex h-5 items-center gap-1 rounded bg-neutral-900 px-1.5 text-[10.5px] font-medium text-white hover:bg-neutral-800"
+                  className="flex h-6 items-center gap-1 rounded-md bg-slate-900 px-2 text-[10.5px] font-medium text-white hover:bg-slate-800"
                 >
                   <MessageSquarePlus
                     className="h-2.5 w-2.5"
@@ -3037,7 +3240,7 @@ function ArchitectWorkspace({
                   New
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-1">
+              <div className="flex-1 overflow-y-auto p-1.5">
                 {sessions.map((sess) => (
                   <div
                     key={sess.id}
@@ -3045,22 +3248,22 @@ function ArchitectWorkspace({
                       setActiveSessionId(sess.id)
                       setHistoryRailOpen(false)
                     }}
-                    className={`group flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-[11.5px] ${
+                    className={`group flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-[12px] ${
                       sess.id === activeSessionId
-                        ? 'bg-neutral-100 font-medium text-neutral-900'
-                        : 'text-neutral-600 hover:bg-neutral-50'
+                        ? 'bg-[#F8FAFC] font-medium text-slate-900'
+                        : 'text-slate-600 hover:bg-[#F8FAFC]'
                     }`}
                   >
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="truncate">{sess.title}</div>
-                      <div className="text-[10px] text-neutral-400">
+                      <div className="text-[10.5px] text-slate-400">
                         {sess.turns?.length || 0} msg
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={(e) => handleDeleteSession(sess.id, e)}
-                      className="p-0.5 text-neutral-300 opacity-0 transition-opacity hover:text-rose-600 group-hover:opacity-100"
+                      className="p-0.5 text-slate-400 opacity-0 transition-opacity hover:text-slate-900 group-hover:opacity-100"
                     >
                       <Trash2 className="h-3 w-3" strokeWidth={1.75} />
                     </button>
@@ -3073,43 +3276,43 @@ function ArchitectWorkspace({
 
         <div className="flex flex-1 flex-col min-w-0">
           <div ref={feedRef} className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-xl space-y-3 px-4 py-4">
+            <div className="mx-auto max-w-xl space-y-3.5 px-4 py-4">
               {turns.length === 0 ? (
                 <div className="pt-6">
                   <div className="text-center">
-                    <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200">
+                    <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-[#F8FAFC]">
                       <Layers
-                        className="h-3.5 w-3.5 text-neutral-700"
+                        className="h-4 w-4 text-slate-700"
                         strokeWidth={1.75}
                       />
                     </div>
-                    <h3 className="mt-2 text-[13px] font-medium text-neutral-900">
-                      How can I help?
+                    <h3 className="mt-2.5 text-[13.5px] font-medium text-slate-900">
+                      Schema Architect
                     </h3>
-                    <p className="mt-0.5 text-[11.5px] text-neutral-500">
-                      Ask about {ontology.name}, or generate new schema.
+                    <p className="mt-0.5 text-[12px] text-slate-500">
+                      Inspect {ontology.name} or generate new domain models.
                     </p>
                   </div>
-                  <div className="mt-4 space-y-1">
+                  <div className="mt-4 space-y-2">
                     {PROMPT_SUGGESTIONS.map((tpl) => (
                       <button
                         key={tpl.title}
                         type="button"
                         onClick={() => sendPrompt(tpl.prompt)}
                         disabled={busy}
-                        className="flex w-full items-start gap-2 rounded-md border border-neutral-200 px-2.5 py-2 text-left hover:border-neutral-300 hover:bg-neutral-50 disabled:opacity-50"
+                        className="flex w-full items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-slate-300 hover:bg-[#F8FAFC] disabled:opacity-50"
                       >
-                        <span className="mt-0.5 text-neutral-400">
+                        <span className="mt-0.5 text-slate-400">
                           <ArrowRight
-                            className="h-3 w-3"
+                            className="h-3.5 w-3.5"
                             strokeWidth={1.75}
                           />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11.5px] font-medium text-neutral-900">
+                          <div className="text-[12px] font-medium text-slate-900">
                             {tpl.title}
                           </div>
-                          <div className="text-[11px] text-neutral-500">
+                          <div className="text-[11.5px] text-slate-500">
                             {tpl.prompt}
                           </div>
                         </div>
@@ -3130,16 +3333,16 @@ function ArchitectWorkspace({
                 ))
               )}
               {busy && (
-                <div className="flex items-center gap-2 text-[11.5px] text-neutral-400">
-                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
-                  Thinking…
+                <div className="flex items-center gap-2 text-[12px] text-slate-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+                  Processing…
                 </div>
               )}
             </div>
           </div>
 
-          <div className="border-t border-neutral-200 px-3 py-2">
-            <div className="rounded-lg border border-neutral-200 focus-within:border-neutral-400">
+          <div className="border-t border-slate-200 bg-[#F8FAFC] p-3">
+            <div className="rounded-xl border border-slate-200 bg-white shadow-xs transition-colors focus-within:border-slate-400">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -3152,38 +3355,40 @@ function ArchitectWorkspace({
                 }}
                 rows={2}
                 placeholder={
-                  mode === 'plan' ? 'Describe a blueprint…' : 'Ask anything…'
+                  mode === 'plan'
+                    ? 'Describe schema blueprint…'
+                    : 'Instruct architect…'
                 }
-                className="w-full resize-none bg-transparent px-2.5 pb-1 pt-2 text-[12.5px] leading-relaxed text-neutral-900 placeholder:text-neutral-400 outline-none"
+                className="w-full resize-none bg-transparent px-3 pb-1.5 pt-2.5 text-[12.5px] leading-relaxed text-slate-900 placeholder:text-slate-400 outline-none"
               />
-              <div className="flex items-center justify-between gap-2 border-t border-neutral-100 px-1.5 py-1">
+              <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-2 py-1.5">
                 <button
                   type="button"
                   onClick={handleSummarize}
                   disabled={turns.length < 2 || summarizing || busy}
-                  className="flex h-6 items-center gap-1 rounded px-1.5 text-[10.5px] font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-40"
+                  className="flex h-6.5 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-slate-500 hover:bg-[#F8FAFC] hover:text-slate-900 disabled:opacity-40"
                 >
                   {summarizing ? (
-                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
-                    <Layers className="h-2.5 w-2.5" strokeWidth={2} />
+                    <Layers className="h-3 w-3" strokeWidth={2} />
                   )}
                   Summarize
                 </button>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[9.5px] text-neutral-300">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-slate-400">
                     ⇧⏎
                   </span>
                   <button
                     type="button"
                     onClick={() => sendPrompt()}
                     disabled={!input.trim() || busy}
-                    className="flex h-6 items-center gap-1 rounded bg-neutral-900 px-2 text-[11px] font-medium text-white hover:bg-neutral-800 disabled:opacity-40"
+                    className="flex h-6.5 items-center gap-1 rounded-lg bg-slate-900 px-2.5 text-[11.5px] font-medium text-white hover:bg-slate-800 disabled:opacity-40"
                   >
                     {busy ? (
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
-                      <Send className="h-2.5 w-2.5" strokeWidth={2} />
+                      <Send className="h-3 w-3" strokeWidth={2} />
                     )}
                     Send
                   </button>
@@ -3216,7 +3421,7 @@ function ChatBubble({
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-neutral-100 px-2.5 py-1.5 text-[12.5px] leading-relaxed text-neutral-900">
+        <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-[#F8FAFC] px-3.5 py-2 text-[12.5px] leading-relaxed text-slate-900">
           <div className="whitespace-pre-wrap break-words">{turn.content}</div>
         </div>
       </div>
@@ -3225,10 +3430,10 @@ function ChatBubble({
 
   if (turn.role === 'error') {
     return (
-      <div className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11.5px] text-rose-800">
-        <div className="flex items-start gap-1.5">
-          <AlertTriangle
-            className="mt-0.5 h-3 w-3 shrink-0 text-rose-600"
+      <div className="rounded-xl border border-slate-300 bg-[#F8FAFC] px-3 py-2.5 text-[12px] text-slate-900">
+        <div className="flex items-start gap-2">
+          <AlertCircle
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-700"
             strokeWidth={2}
           />
           <div className="min-w-0 flex-1 break-words">{turn.content}</div>
@@ -3239,9 +3444,9 @@ function ChatBubble({
 
   if (turn.role === 'summary') {
     return (
-      <div className="rounded-md border border-neutral-200 bg-neutral-50 px-2.5 py-2">
-        <div className="mb-1 flex items-center gap-1 font-mono text-[9.5px] uppercase tracking-wider text-neutral-500">
-          <Layers className="h-2.5 w-2.5" strokeWidth={2} />
+      <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 py-2.5">
+        <div className="mb-1 flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-wider text-slate-500">
+          <Layers className="h-3 w-3" strokeWidth={2} />
           Summary
         </div>
         <MarkdownRenderer content={turn.content} />
@@ -3253,17 +3458,19 @@ function ChatBubble({
     <div className="group">
       <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <div className="flex h-4 w-4 items-center justify-center rounded bg-neutral-900">
-            <span className="text-[8px] font-bold text-white">AI</span>
+          <div className="flex h-4.5 w-4.5 items-center justify-center rounded-md bg-slate-900">
+            <span className="font-mono text-[8px] font-bold text-white">
+              AI
+            </span>
           </div>
-          <span className="text-[11px] font-medium text-neutral-900">
-            Agent
+          <span className="text-[11.5px] font-medium text-slate-900">
+            Architect
           </span>
         </div>
         <button
           type="button"
           onClick={onCopy}
-          className="flex h-5 items-center gap-1 rounded px-1 text-[10px] text-neutral-400 opacity-0 hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100"
+          className="flex h-5.5 items-center gap-1 rounded-md px-1.5 text-[10.5px] text-slate-400 opacity-0 hover:bg-[#F8FAFC] hover:text-slate-700 group-hover:opacity-100"
         >
           {copied ? (
             <>
@@ -3280,39 +3487,39 @@ function ChatBubble({
       </div>
       <MarkdownRenderer content={turn.content} />
       {(turn.entityCount || turn.relationshipCount) && (
-        <div className="mt-1.5 flex gap-1">
+        <div className="mt-2 flex gap-1.5">
           {!!turn.entityCount && (
-            <span className="rounded border border-neutral-200 px-1.5 py-0 font-mono text-[10px] text-neutral-500">
+            <span className="rounded-md border border-slate-200 bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] text-slate-600">
               +{turn.entityCount}e
             </span>
           )}
           {!!turn.relationshipCount && (
-            <span className="rounded border border-neutral-200 px-1.5 py-0 font-mono text-[10px] text-neutral-500">
+            <span className="rounded-md border border-slate-200 bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] text-slate-600">
               +{turn.relationshipCount}r
             </span>
           )}
         </div>
       )}
       {turn.planData && (
-        <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 p-2">
-          <div className="text-[11px] font-medium text-neutral-900">
+        <div className="mt-2.5 rounded-xl border border-slate-200 bg-[#F8FAFC] p-3">
+          <div className="text-[11.5px] font-medium text-slate-900">
             Blueprint ready
           </div>
-          <p className="mt-0.5 text-[10.5px] text-neutral-500">
-            Review before applying.
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Review schema changes before applying.
           </p>
           <button
             type="button"
             onClick={onApprovePlan}
             disabled={applyingPlan}
-            className="mt-1.5 flex h-6 items-center gap-1 rounded bg-neutral-900 px-2 text-[11px] font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+            className="mt-2 flex h-7 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-[11.5px] font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
             {applyingPlan ? (
-              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <Check className="h-2.5 w-2.5" strokeWidth={2.5} />
+              <Check className="h-3 w-3" strokeWidth={2.5} />
             )}
-            {applyingPlan ? 'Applying…' : 'Apply'}
+            {applyingPlan ? 'Applying…' : 'Apply Blueprint'}
           </button>
         </div>
       )}
@@ -3327,9 +3534,9 @@ function MarkdownRenderer({ content }: { content: string }) {
       components={{
         code({ inline, className, children, ...props }: any) {
           return !inline ? (
-            <pre className="my-1.5 overflow-x-auto rounded-md bg-neutral-900 p-2">
+            <pre className="my-2 overflow-x-auto rounded-xl bg-slate-900 p-3">
               <code
-                className={`font-mono text-[11px] leading-relaxed text-neutral-100 ${
+                className={`font-mono text-[11px] leading-relaxed text-slate-100 ${
                   className || ''
                 }`}
                 {...props}
@@ -3339,7 +3546,7 @@ function MarkdownRenderer({ content }: { content: string }) {
             </pre>
           ) : (
             <code
-              className="rounded bg-neutral-100 px-1 py-0 font-mono text-[11px] text-neutral-800"
+              className="rounded-md bg-[#F8FAFC] px-1.5 py-0.5 font-mono text-[11px] text-slate-800 border border-slate-200/70"
               {...props}
             >
               {children}
@@ -3348,62 +3555,64 @@ function MarkdownRenderer({ content }: { content: string }) {
         },
         table({ children }) {
           return (
-            <div className="my-1.5 overflow-x-auto rounded-md border border-neutral-200">
-              <table className="min-w-full divide-y divide-neutral-100 text-[11px]">
+            <div className="my-2 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-[11.5px]">
                 {children}
               </table>
             </div>
           )
         },
         thead({ children }) {
-          return <thead className="bg-neutral-50">{children}</thead>
+          return <thead className="bg-[#F8FAFC]">{children}</thead>
         },
         th({ children }) {
           return (
-            <th className="px-2 py-1 text-left text-[10.5px] font-medium uppercase tracking-wide text-neutral-500">
+            <th className="px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-slate-500">
               {children}
             </th>
           )
         },
         td({ children }) {
-          return <td className="px-2 py-1 text-neutral-700">{children}</td>
+          return <td className="px-2.5 py-1.5 text-slate-700">{children}</td>
         },
         h1({ children }) {
           return (
-            <h1 className="mb-1 mt-2 text-[13px] font-semibold">{children}</h1>
+            <h1 className="mb-1 mt-2 text-[13.5px] font-semibold text-slate-900">
+              {children}
+            </h1>
           )
         },
         h2({ children }) {
           return (
-            <h2 className="mb-1 mt-2 text-[12.5px] font-semibold">
+            <h2 className="mb-1 mt-2 text-[13px] font-semibold text-slate-900">
               {children}
             </h2>
           )
         },
         h3({ children }) {
           return (
-            <h3 className="mb-1 mt-1.5 text-[12px] font-semibold">
+            <h3 className="mb-1 mt-1.5 text-[12.5px] font-semibold text-slate-900">
               {children}
             </h3>
           )
         },
         p({ children }) {
           return (
-            <p className="my-1 text-[12px] leading-relaxed text-neutral-700">
+            <p className="my-1 text-[12.5px] leading-relaxed text-slate-700">
               {children}
             </p>
           )
         },
         ul({ children }) {
-          return <ul className="my-1 list-disc pl-4 text-[12px]">{children}</ul>
+          return <ul className="my-1 list-disc pl-4 text-[12.5px]">{children}</ul>
         },
         ol({ children }) {
           return (
-            <ol className="my-1 list-decimal pl-4 text-[12px]">{children}</ol>
+            <ol className="my-1 list-decimal pl-4 text-[12.5px]">{children}</ol>
           )
         },
         li({ children }) {
-          return <li className="my-0.5 text-[12px] text-neutral-700">{children}</li>
+          return <li className="my-0.5 text-[12.5px] text-slate-700">{children}</li>
         },
         a({ href, children }) {
           return (
@@ -3411,7 +3620,7 @@ function MarkdownRenderer({ content }: { content: string }) {
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="text-neutral-900 underline underline-offset-2 hover:text-neutral-700"
+              className="text-slate-900 underline underline-offset-2 hover:text-slate-600"
             >
               {children}
             </a>
@@ -3419,13 +3628,13 @@ function MarkdownRenderer({ content }: { content: string }) {
         },
         blockquote({ children }) {
           return (
-            <blockquote className="my-1 border-l-2 border-neutral-200 pl-2 text-neutral-600">
+            <blockquote className="my-1.5 border-l-2 border-slate-300 pl-2.5 text-slate-600">
               {children}
             </blockquote>
           )
         },
         hr() {
-          return <hr className="my-2 border-neutral-100" />
+          return <hr className="my-2 border-slate-200" />
         },
       }}
     >
